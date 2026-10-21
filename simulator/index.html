@@ -1,0 +1,1029 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LightningSystem — симулятор</title>
+<!--
+  Веб-симулятор системы освещения (демо-режим).
+
+  Сейчас страница работает сама по себе: всё «железо» и логика сервера
+  (лампы, ножки GPIO, датчики, плавные переходы, авто-режим, расписания,
+  циркадный режим, учёт энергии) эмулируются прямо в браузере.
+  Правила те же, что описаны в AGENTS.md (раздел «Логика»), поэтому когда появится сервер,
+  блок «Движок» заменяется подключением к /ws/state и REST API,
+  а отрисовка остаётся прежней.
+
+  Открыть: просто открыть этот файл в браузере.
+-->
+<style>
+:root {
+  --bg: #0b0e14;
+  --panel: #131824;
+  --panel2: #1a2030;
+  --line: #273046;
+  --text: #e6e9ef;
+  --muted: #8a93a6;
+  --accent: #f5b84b;
+  --ok: #3fb950;
+  --err: #f85149;
+  --info: #58a6ff;
+  --wall: #2b3245;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); }
+body { font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+h1, h2, h3 { margin: 0; font-weight: 600; }
+h2 { font-size: 18px; }
+h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 10px; }
+button { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+button:hover { border-color: #3b4763; }
+button.on { background: #3a2f12; border-color: var(--accent); color: var(--accent); }
+button.danger.on { background: #3a1515; border-color: var(--err); color: var(--err); }
+button:disabled { opacity: .4; cursor: not-allowed; }
+select, input[type=time], input[type=number] { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
+input[type=range] { width: 100%; accent-color: var(--accent); }
+small, .muted { color: var(--muted); }
+
+header { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 14px 20px; border-bottom: 1px solid var(--line); }
+header h1 { font-size: 18px; }
+.badge { font-size: 12px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.badge.demo { border-color: #6b5420; color: var(--accent); }
+
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 370px; gap: 16px; padding: 16px 20px 40px; max-width: 1500px; margin: 0 auto; }
+@media (max-width: 1100px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+.right { display: flex; flex-direction: column; gap: 16px; }
+.left { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+
+/* ---------- План квартиры ---------- */
+.plan {
+  display: grid; gap: 6px; padding: 6px; border-radius: 14px; background: var(--wall);
+  grid-template-columns: 1.35fr 1fr;
+  grid-template-rows: 250px 210px;
+  grid-template-areas: "living kitchen" "bedroom hall";
+}
+@media (max-width: 640px) {
+  .plan { grid-template-columns: 1fr; grid-template-rows: 230px 200px 200px 170px; grid-template-areas: "living" "kitchen" "bedroom" "hall"; }
+}
+.room { position: relative; overflow: hidden; border-radius: 8px; cursor: pointer; transition: background-color 1s; }
+.room.sel { outline: 2px solid var(--accent); outline-offset: -2px; }
+.room-window { position: absolute; top: 0; left: 25%; right: 25%; height: 5px; border-radius: 0 0 4px 4px; transition: background-color 1s; z-index: 3; }
+.room-head { position: absolute; left: 10px; right: 10px; top: 12px; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; z-index: 4; pointer-events: none; text-shadow: 0 1px 3px #000a; }
+.room-head b { font-size: 14px; }
+.room-head span { font-size: 12px; color: #c9cfdb; text-align: right; }
+.room-foot { position: absolute; left: 10px; bottom: 8px; z-index: 4; font-size: 11px; color: #c9cfdb; pointer-events: none; text-shadow: 0 1px 3px #000a; }
+.pool { position: absolute; transform: translate(-50%, -50%); border-radius: 50%; pointer-events: none; mix-blend-mode: screen; z-index: 1; }
+.lamp { position: absolute; transform: translate(-50%, -50%); z-index: 2; }
+.bulb { width: 22px; height: 22px; border-radius: 50%; border: 2px solid rgba(255,255,255,.22); cursor: pointer; }
+.bulb:hover { border-color: rgba(255,255,255,.6); }
+.lamp-label { position: absolute; top: 27px; left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: 11px; color: #c9cfdb; text-shadow: 0 1px 3px #000c; pointer-events: none; }
+.plan-hint { font-size: 12px; color: var(--muted); margin-top: 8px; }
+
+/* ---------- Панель комнаты ---------- */
+.panel-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px; }
+@media (max-width: 760px) { .grid2 { grid-template-columns: 1fr; } }
+.box { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+.row { display: flex; align-items: center; gap: 10px; margin: 8px 0; flex-wrap: wrap; }
+.row > label:first-child { min-width: 92px; color: var(--muted); font-size: 13px; }
+.row .grow { flex: 1; min-width: 120px; }
+.val { min-width: 56px; text-align: right; font-variant-numeric: tabular-nums; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; border-right: 1px solid var(--line); background: transparent; padding: 5px 10px; }
+.seg button:last-child { border-right: 0; }
+.seg button.on { background: #3a2f12; color: var(--accent); }
+.temp-range { background: linear-gradient(90deg, #ffb46b, #fff4e8, #cddcff); border-radius: 999px; height: 6px; appearance: none; -webkit-appearance: none; }
+.temp-range::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: #fff; border: 2px solid #555; }
+.temp-range::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 2px solid #555; }
+.status { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.status i { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); display: inline-block; }
+.status.err i { background: var(--err); }
+.status.err { color: var(--err); }
+.note { font-size: 12px; color: var(--muted); margin-top: 6px; }
+.warn { color: var(--accent); font-size: 12px; }
+
+.lamps { display: flex; flex-direction: column; gap: 10px; }
+.lamp-row { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: grid; grid-template-columns: 190px minmax(0, 1fr) minmax(0, 1fr) auto; gap: 8px 16px; align-items: center; }
+.lamp-row.flash { border-color: var(--accent); }
+@media (max-width: 900px) { .lamp-row { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 520px) { .lamp-row { grid-template-columns: 1fr; } }
+.lr-name { display: flex; align-items: center; gap: 10px; }
+.lr-name .dot { width: 14px; height: 14px; border-radius: 50%; flex: none; border: 1px solid rgba(255,255,255,.2); }
+.lr-ctl { display: flex; align-items: center; gap: 8px; }
+.lr-ctl span { font-size: 12px; color: var(--muted); }
+.lr-modes { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.pins { grid-column: 1 / -1; font: 12px/1.4 ui-monospace, Consolas, monospace; color: var(--muted); }
+.pins b { color: var(--text); font-weight: 500; }
+.switch { position: relative; width: 38px; height: 22px; flex: none; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.switch span { position: absolute; inset: 0; background: #2c3447; border-radius: 999px; cursor: pointer; transition: .2s; }
+.switch span::before { content: ""; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px; background: #9aa3b5; border-radius: 50%; transition: .2s; }
+.switch input:checked + span { background: #6b5420; }
+.switch input:checked + span::before { transform: translateX(16px); background: var(--accent); }
+
+/* ---------- Часы ---------- */
+.clock { font: 600 34px/1 ui-monospace, Consolas, monospace; letter-spacing: .02em; }
+.clock-sub { color: var(--muted); font-size: 12px; margin: 4px 0 10px; }
+.btns { display: flex; flex-wrap: wrap; gap: 6px; }
+.circ { position: relative; height: 18px; border-radius: 6px; overflow: hidden; display: flex; margin-top: 6px; }
+.circ div { flex: 1; }
+.circ-mark { position: absolute; top: -3px; bottom: -3px; width: 2px; background: #fff; box-shadow: 0 0 0 1px #000; }
+.circ-scale { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 3px; }
+
+/* ---------- Энергия ---------- */
+.kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
+.kpi { background: var(--panel2); border-radius: 8px; padding: 8px; }
+.kpi b { display: block; font-size: 18px; font-variant-numeric: tabular-nums; }
+.kpi small { font-size: 11px; }
+.erow { display: grid; grid-template-columns: 90px 1fr 84px; gap: 8px; align-items: center; font-size: 13px; margin: 5px 0; }
+.ebar { height: 8px; background: #222a3b; border-radius: 4px; overflow: hidden; }
+.ebar div { height: 100%; background: var(--accent); width: 0; transition: width .5s; }
+.erow .val { min-width: 0; }
+
+/* ---------- Плата ---------- */
+.board { background: #0f3b29; border: 1px solid #1d5c41; border-radius: 10px; padding: 10px 8px; }
+.prow { display: grid; grid-template-columns: 1fr 18px 18px 1fr; gap: 4px 6px; align-items: center; height: 19px; }
+.plabel { font: 10.5px/1 ui-monospace, Consolas, monospace; color: #9cc9b3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.plabel.l { text-align: right; }
+.plabel.used { color: #e9fff3; }
+.pin { width: 14px; height: 14px; border-radius: 50%; background: #48514a; border: 2px solid #c7a650; justify-self: center; cursor: default; }
+.pin.p5v { background: #c0392b; }
+.pin.p3v { background: #e67e22; }
+.pin.gnd { background: #111; }
+.pin.i2c { background: var(--info); }
+.pin.id { background: #6c6c6c; }
+.pin.used { background: #2d6a4f; }
+.pin.hl { outline: 2px solid #fff; }
+.legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11px; color: var(--muted); margin-top: 8px; }
+.legend span::before { content: ""; display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; background: var(--c); }
+.pin-info { font: 12px/1.4 ui-monospace, Consolas, monospace; min-height: 34px; margin-top: 8px; color: var(--text); }
+
+/* ---------- Журнал ---------- */
+.log { max-height: 260px; overflow: auto; font-size: 12.5px; display: flex; flex-direction: column; gap: 4px; }
+.log div { display: grid; grid-template-columns: 44px 1fr; gap: 8px; }
+.log time { color: var(--muted); font-variant-numeric: tabular-nums; }
+.log .err { color: var(--err); }
+.log .ok { color: var(--ok); }
+.log .auto { color: var(--info); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>💡 LightningSystem — симулятор</h1>
+  <span class="badge demo" title="Данные генерируются в браузере. Позже страница подключится к серверу через WebSocket /ws/state.">Демо-режим · без сервера</span>
+  <span class="badge" id="boardSummary"></span>
+</header>
+
+<main class="layout">
+  <section class="left">
+    <div class="card">
+      <div class="plan" id="plan"></div>
+      <div class="plan-hint">Нажмите на комнату, чтобы открыть её пульт. Нажатие на лампу включает/выключает её.</div>
+    </div>
+    <div class="card" id="panel"></div>
+  </section>
+
+  <aside class="right">
+    <div class="card">
+      <h3>Время на «устройстве»</h3>
+      <div class="clock" id="clock">--:--:--</div>
+      <div class="clock-sub" id="clockSub"></div>
+      <div class="row">
+        <label>Скорость</label>
+        <div class="seg" id="speedSeg">
+          <button data-speed="1">×1</button>
+          <button data-speed="60">×60</button>
+          <button data-speed="600">×600</button>
+        </div>
+      </div>
+      <div class="btns" id="todBtns">
+        <button data-tod="7:00">🌅 Утро</button>
+        <button data-tod="13:00">☀️ День</button>
+        <button data-tod="19:30">🌇 Вечер</button>
+        <button data-tod="23:00">🌙 Ночь</button>
+        <button data-tod="now">⟲ Сейчас</button>
+      </div>
+      <div style="margin-top:14px">
+        <div class="row" style="margin:0"><label>Циркадная кривая</label><span class="grow"></span><span class="val" id="circK"></span></div>
+        <div class="circ" id="circ"></div>
+        <div class="circ-scale"><span>0</span><span>6</span><span>12</span><span>18</span><span>24</span></div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <label>Плавность</label>
+        <input class="grow" type="range" min="0" max="2000" step="100" id="fade">
+        <span class="val" id="fadeVal"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Электроэнергия (с момента запуска)</h3>
+      <div class="kpis">
+        <div class="kpi"><small>Сейчас</small><b id="eNow">0 Вт</b></div>
+        <div class="kpi"><small>Потрачено</small><b id="eWh">0 Вт·ч</b></div>
+        <div class="kpi"><small>Стоимость</small><b id="eRub">0 ₽</b></div>
+      </div>
+      <div id="eRooms"></div>
+      <div class="row" style="margin-bottom:0">
+        <label>Тариф</label>
+        <input type="number" id="tariff" min="0" step="0.1" style="width:80px"> <small>₽ за кВт·ч</small>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Плата Raspberry Pi · 40 ножек</h3>
+      <div class="board" id="board"></div>
+      <div class="legend">
+        <span style="--c:#2d6a4f">занята лампой</span>
+        <span style="--c:#48514a">свободна</span>
+        <span style="--c:var(--info)">I2C (датчики)</span>
+        <span style="--c:#c0392b">5 В</span>
+        <span style="--c:#e67e22">3.3 В</span>
+        <span style="--c:#111">GND</span>
+      </div>
+      <div class="pin-info" id="pinInfo">Наведите на ножку, чтобы увидеть, что к ней подключено.</div>
+    </div>
+
+    <div class="card">
+      <h3>Журнал событий</h3>
+      <div class="log" id="log"></div>
+    </div>
+  </aside>
+</main>
+
+<script>
+"use strict";
+
+// =====================================================================
+// Конфигурация «сборки» — то же, что будет лежать в server/hardware.yaml
+// =====================================================================
+const ROOMS = [
+  { id: 1, name: "Гостиная", area: "living", target_lux: 300,
+    sensor: { name: "BH1750", bus: "I2C-1, адрес 0x23", window: 1.0 },
+    schedule: { on: "18:00", off: "23:30", brightness: 80 } },
+  { id: 2, name: "Кухня", area: "kitchen", target_lux: 400,
+    sensor: { name: "BH1750", bus: "I2C-1 → мультиплексор TCA9548A (0x70), канал 1, адрес 0x23", window: 0.8 },
+    schedule: { on: "07:00", off: "09:00", brightness: 100 } },
+  { id: 3, name: "Спальня", area: "bedroom", target_lux: 200,
+    sensor: { name: "BH1750", bus: "I2C-1, адрес 0x5C", window: 0.6 },
+    schedule: { on: "21:00", off: "23:00", brightness: 40 } },
+  { id: 4, name: "Прихожая", area: "hall", target_lux: 150, sensor: null,
+    schedule: { on: "18:30", off: "00:30", brightness: 100 } },
+];
+
+// kind: cct — реле + тёплый + холодный; dimmable — (реле) + один ШИМ; onoff — только реле
+const LAMPS = [
+  { id: 1,  room: 1, name: "Люстра",        kind: "cct",      pins: { relay: 5,  warm: 17, cool: 27 }, rated_w: 24, pos: [50, 42] },
+  { id: 2,  room: 1, name: "Торшер",        kind: "cct",      pins: { relay: 22, warm: 18, cool: 25 }, rated_w: 10, pos: [15, 74] },
+  { id: 3,  room: 1, name: "Подсветка ТВ",  kind: "dimmable", pins: { relay: 4,  pwm: 12 },            rated_w: 6,  pos: [84, 78] },
+  { id: 4,  room: 1, name: "Бра",           kind: "dimmable", pins: { pwm: 8 },                        rated_w: 4,  pos: [84, 30] },
+  { id: 5,  room: 2, name: "Основной свет", kind: "cct",      pins: { relay: 16, warm: 20, cool: 21 }, rated_w: 18, pos: [50, 38] },
+  { id: 6,  room: 2, name: "Над столом",    kind: "cct",      pins: { relay: 26, warm: 19, cool: 10 }, rated_w: 12, pos: [30, 74] },
+  { id: 7,  room: 2, name: "Рабочая зона",  kind: "dimmable", pins: { pwm: 9 },                        rated_w: 5,  pos: [80, 74] },
+  { id: 8,  room: 3, name: "Потолок",       kind: "cct",      pins: { relay: 6,  warm: 23, cool: 24 }, rated_w: 15, pos: [45, 45] },
+  { id: 9,  room: 3, name: "Ночник",        kind: "dimmable", pins: { pwm: 13 },                       rated_w: 3,  pos: [82, 74] },
+  { id: 10, room: 4, name: "Светильник",    kind: "onoff",    pins: { relay: 11 },                     rated_w: 8,  pos: [50, 55] },
+];
+
+// Начальное состояние, чтобы картинка сразу была «живой»
+const INITIAL = {
+  1: { is_on: true,  brightness: 70, temp: 3000, mode: "manual",   color_mode: "circadian" },
+  2: { is_on: true,  brightness: 40, temp: 2700, mode: "manual",   color_mode: "manual" },
+  3: { is_on: false, brightness: 50, mode: "manual" },
+  4: { is_on: false, brightness: 60, mode: "manual" },
+  5: { is_on: false, brightness: 0,  temp: 4500, mode: "auto",     color_mode: "circadian" },
+  6: { is_on: false, brightness: 0,  temp: 4000, mode: "auto",     color_mode: "circadian" },
+  7: { is_on: false, brightness: 0,  mode: "auto" },
+  8: { is_on: false, brightness: 40, temp: 2700, mode: "schedule", color_mode: "circadian" },
+  9: { is_on: false, brightness: 20, mode: "manual" },
+  10: { is_on: false, brightness: 100, mode: "manual" },
+};
+
+// Схема 40-контактной гребёнки: [физический номер, тип, BCM]
+const HEADER = [
+  [1, "3v3"], [2, "5v"], [3, "gpio", 2], [4, "5v"], [5, "gpio", 3], [6, "gnd"], [7, "gpio", 4], [8, "gpio", 14],
+  [9, "gnd"], [10, "gpio", 15], [11, "gpio", 17], [12, "gpio", 18], [13, "gpio", 27], [14, "gnd"], [15, "gpio", 22],
+  [16, "gpio", 23], [17, "3v3"], [18, "gpio", 24], [19, "gpio", 10], [20, "gnd"], [21, "gpio", 9], [22, "gpio", 25],
+  [23, "gpio", 11], [24, "gpio", 8], [25, "gnd"], [26, "gpio", 7], [27, "id", "ID_SD"], [28, "id", "ID_SC"],
+  [29, "gpio", 5], [30, "gnd"], [31, "gpio", 6], [32, "gpio", 12], [33, "gpio", 13], [34, "gnd"], [35, "gpio", 19],
+  [36, "gpio", 16], [37, "gpio", 26], [38, "gpio", 20], [39, "gnd"], [40, "gpio", 21],
+];
+const ALLOWED_PINS = Array.from({ length: 24 }, (_, i) => i + 4); // BCM 4–27; 2/3 заняты шиной I2C
+
+const K_MIN = 2700, K_MAX = 6500;
+const GAMMA = 2.2;
+const STANDBY_W = 0.3;
+const CURVE = [[0, 2700], [6, 2700], [9, 5000], [13, 6000], [17, 5000], [20, 3500], [22, 2700], [24, 2700]];
+const ROLE_NAMES = { relay: "реле", warm: "тёплый", cool: "холодный", pwm: "ШИМ" };
+const KIND_NAMES = { cct: "тёплый↔холодный", dimmable: "с регулировкой", onoff: "вкл/выкл" };
+const MODE_NAMES = { manual: "Ручной", auto: "Авто", schedule: "Расписание" };
+
+// =====================================================================
+// Утилиты
+// =====================================================================
+const $ = (s, r = document) => r.querySelector(s);
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const pad = n => String(n).padStart(2, "0");
+const roomById = id => ROOMS.find(r => r.id === id);
+const lampsOf = room => LAMPS.filter(l => l.room === room.id);
+const fmt = (v, d = 0) => v.toLocaleString("ru-RU", { minimumFractionDigits: d, maximumFractionDigits: d });
+
+// Цвет белого света заданной температуры (приближение Таннера Хелланда) — только для отрисовки
+function kelvinToRgb(k) {
+  const t = k / 100;
+  let r, g, b;
+  if (t <= 66) {
+    r = 255;
+    g = 99.4708025861 * Math.log(t) - 161.1195681661;
+    b = t <= 19 ? 0 : 138.5177312231 * Math.log(t - 10) - 305.0447927307;
+  } else {
+    r = 329.698727446 * Math.pow(t - 60, -0.1332047592);
+    g = 288.1221695283 * Math.pow(t - 60, -0.0755148492);
+    b = 255;
+  }
+  return [r, g, b].map(v => Math.round(clamp(v, 0, 255)));
+}
+
+function curveK(h) {
+  for (let i = 1; i < CURVE.length; i++) {
+    const [h0, k0] = CURVE[i - 1], [h1, k1] = CURVE[i];
+    if (h <= h1) return k0 + (k1 - k0) * (h - h0) / (h1 - h0);
+  }
+  return CURVE[CURVE.length - 1][1];
+}
+
+const parseHM = s => { const [h, m] = s.split(":").map(Number); return h + m / 60; };
+function inInterval(h, on, off) {
+  const a = parseHM(on), b = parseHM(off);
+  return a <= b ? h >= a && h < b : h >= a || h < b;   // интервал через полночь
+}
+
+// =====================================================================
+// Часы «устройства» — их можно перематывать и ускорять
+// =====================================================================
+const clock = { baseSim: Date.now(), baseReal: Date.now(), speed: 1 };
+const simNow = () => clock.baseSim + (Date.now() - clock.baseReal) * clock.speed;
+function simHours(t = simNow()) { const d = new Date(t); return d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600; }
+function simHM(t = simNow()) { const d = new Date(t); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+function setSpeed(s) { clock.baseSim = simNow(); clock.baseReal = Date.now(); clock.speed = s; }
+function setTimeOfDay(h, m) {
+  const d = new Date(simNow()); d.setHours(h, m, 0, 0);
+  clock.baseSim = d.getTime(); clock.baseReal = Date.now();
+  energy.lastSim = clock.baseSim;   // перемотка — не потребление
+}
+
+// =====================================================================
+// Движок — эмуляция драйверов и логики сервера (см. AGENTS.md, раздел «Логика»)
+// =====================================================================
+let fadeMs = 600;
+let dirty = true;
+const events = [];
+
+function log(text, kind = "") {
+  events.unshift({ t: simHM(), text, kind });
+  if (events.length > 60) events.pop();
+  dirty = true;
+}
+
+// Состояние ламп и «ножек»
+for (const l of LAMPS) {
+  l.min_k = K_MIN; l.max_k = K_MAX;
+  l.state = { temp: 4000, color_mode: "manual", ...INITIAL[l.id] };
+  l.duty = { relay: 0, warm: 0, cool: 0, pwm: 0 };
+  l.tr = null;
+  l.wh = 0;
+}
+for (const r of ROOMS) {
+  r.autoOn = null;
+  r.wh = 0;
+  if (r.sensor) Object.assign(r.sensor, { lux: 0, status: "ok", fails: 0, override: null, fault: false });
+}
+
+// Яркость + температура → duty на ножках (с гамма-коррекцией)
+function targetDuty(l) {
+  const s = l.state, d = { relay: 0, warm: 0, cool: 0, pwm: 0 };
+  if (!s.is_on) return d;
+  d.relay = 1;
+  const b = l.kind === "onoff" ? 1 : Math.pow(s.brightness / 100, GAMMA);
+  if (l.kind === "cct") {
+    const t = clamp((s.temp - K_MIN) / (K_MAX - K_MIN), 0, 1);
+    d.warm = (1 - t) * b;
+    d.cool = t * b;
+  } else if (l.kind === "dimmable") {
+    d.pwm = b;
+  }
+  return d;
+}
+
+// Плавный переход: при включении реле замыкается сразу и свет нарастает,
+// при выключении сначала гаснет ШИМ, потом размыкается реле
+function startTransition(l, to = targetDuty(l), ms = fadeMs) {
+  const from = { ...l.duty };
+  if (to.relay === 1) { l.duty.relay = 1; from.relay = 1; }
+  l.tr = { from, to, t0: performance.now(), ms };
+}
+
+function stepTransitions(now) {
+  for (const l of LAMPS) {
+    if (!l.tr) continue;
+    const { from, to, t0, ms } = l.tr;
+    const k = ms > 0 ? clamp((now - t0) / ms, 0, 1) : 1;
+    for (const ch of ["warm", "cool", "pwm"]) l.duty[ch] = from[ch] + (to[ch] - from[ch]) * k;
+    if (k >= 1) { l.duty.relay = to.relay; l.tr = null; }
+  }
+}
+
+// Единая точка изменения лампы (LightingService.apply)
+function apply(l, changes, source = "user") {
+  const ch = { ...changes };
+  const s = l.state, before = { ...s };
+  if (l.kind !== "cct") { delete ch.temp; delete ch.color_mode; }
+  if (l.kind === "onoff") delete ch.brightness;
+  if ("brightness" in ch) ch.brightness = clamp(Math.round(ch.brightness), 0, 100);
+  if ("temp" in ch) ch.temp = clamp(Math.round(ch.temp), l.min_k, l.max_k);
+  if (source === "user") {
+    if ("brightness" in ch && !("is_on" in ch) && ch.brightness > 0) ch.is_on = true;
+    if (("is_on" in ch || "brightness" in ch) && !("mode" in ch)) ch.mode = "manual";
+    if ("temp" in ch && !("color_mode" in ch)) ch.color_mode = "manual";
+  }
+  Object.assign(s, ch);
+  if (s.is_on !== before.is_on || s.brightness !== before.brightness || s.temp !== before.temp) {
+    clearTimeout(l.idTimer);
+    startTransition(l);
+  }
+  if (source === "user" && before.mode !== "manual" && s.mode === "manual" && !("mode" in changes))
+    log(`${l.name}: ручное управление — режим «Ручной»`);
+  dirty = true;
+}
+
+function setMode(l, mode) {
+  const room = roomById(l.room);
+  if (mode === "auto" && !room.sensor) { log(`${l.name}: в комнате «${room.name}» нет датчика — авто-режим недоступен`, "err"); return; }
+  if (mode === "auto" && l.kind === "onoff") { /* вкл/выкл по датчику без яркости — допустимо */ }
+  l.state.mode = mode;
+  dirty = true;
+}
+
+function roomCommand(room, ch) {
+  for (const l of lampsOf(room)) apply(l, ch, "user");
+}
+
+function identify(l) {
+  clearTimeout(l.idTimer);
+  const lit = { relay: 1, warm: .5, cool: .5, pwm: 1 }, dark = { relay: 0, warm: 0, cool: 0, pwm: 0 };
+  let i = 0;
+  const tick = () => {
+    if (i < 6) { startTransition(l, i % 2 ? lit : dark, 60); i++; l.idTimer = setTimeout(tick, 220); }
+    else startTransition(l);
+  };
+  log(`${l.name}: «Мигнуть» — ищем лампу`);
+  tick();
+}
+
+// ---------- Датчики ----------
+function outdoorLux(h) {
+  const rise = 7.2, set = 17.6;       // конец октября
+  if (h < rise - 0.7 || h > set + 0.7) return 0;
+  if (h < rise) return 30 * (1 - (rise - h) / 0.7);
+  if (h > set) return 30 * (1 - (h - set) / 0.7);
+  return 30 + 870 * Math.pow(Math.sin(Math.PI * (h - rise) / (set - rise)), 0.8);
+}
+
+function readLux(sensor) {
+  if (sensor.fault) throw new Error("OSError: [Errno 121] Remote I/O error");  // как smbus2 при обрыве
+  if (sensor.override != null) return sensor.override;
+  return outdoorLux(simHours()) * sensor.window * (1 + (Math.random() - .5) * .06);
+}
+
+function sensorLoop() {
+  for (const r of ROOMS) {
+    const s = r.sensor;
+    if (!s) continue;
+    try {
+      const v = readLux(s);
+      s.lux = s.status === "ok" && s.fails === 0 ? s.lux * .6 + v * .4 : v;   // сглаживание
+      if (s.status === "error") log(`Датчик «${r.name}» снова отвечает`, "ok");
+      s.status = "ok"; s.fails = 0;
+    } catch (e) {
+      s.fails++;
+      if (s.fails === 3) { s.status = "error"; log(`Датчик «${r.name}» не отвечает (3 ошибки подряд)`, "err"); }
+    }
+  }
+  dirty = true;
+}
+
+// ---------- Авто-режим ----------
+function autoLoop() {
+  for (const r of ROOMS) {
+    const lamps = lampsOf(r).filter(l => l.state.mode === "auto");
+    if (!lamps.length || !r.sensor || r.sensor.status !== "ok") continue;   // при сбое держим яркость
+    const amb = r.sensor.lux, tgt = r.target_lux;
+    const prev = r.autoOn;
+    if (amb > tgt * 1.1) r.autoOn = false;
+    else if (amb < tgt * .9) r.autoOn = true;
+    else if (r.autoOn === null) r.autoOn = amb < tgt;
+    if (prev !== null && prev !== r.autoOn)
+      log(`Авто: «${r.name}» — ${r.autoOn ? "темно, включаем" : "светло, гасим"} (${fmt(amb)} лк)`, "auto");
+    const need = r.autoOn ? Math.max(5, clamp((tgt - amb) / tgt, 0, 1) * 100) : 0;
+    for (const l of lamps) {
+      if (l.kind === "onoff") { if (l.state.is_on !== r.autoOn) apply(l, { is_on: r.autoOn }, "auto"); continue; }
+      const cur = l.state.is_on ? l.state.brightness : 0;
+      const nb = cur + clamp(need - cur, -10, 10);   // не больше 10% за шаг
+      if (nb <= 0) { if (l.state.is_on) apply(l, { is_on: false }, "auto"); }
+      else if (nb !== cur || !l.state.is_on) apply(l, { is_on: true, brightness: nb }, "auto");
+    }
+  }
+}
+
+// ---------- Расписание ----------
+function scheduleLoop() {
+  const h = simHours();
+  for (const r of ROOMS) {
+    const sc = r.schedule;
+    const active = inInterval(h, sc.on, sc.off);
+    for (const l of lampsOf(r)) {
+      if (l.state.mode !== "schedule") continue;
+      const ch = { is_on: active };
+      if (active && l.kind !== "onoff") ch.brightness = sc.brightness;
+      if (l.state.is_on !== active || (active && ch.brightness != null && l.state.brightness !== ch.brightness)) {
+        apply(l, ch, "schedule");
+        log(`Расписание: ${l.name} (${r.name}) — ${active ? "включено" : "выключено"}`, "auto");
+      }
+    }
+  }
+}
+
+// ---------- Циркадный режим ----------
+function circadianLoop() {
+  const k = curveK(simHours());
+  for (const l of LAMPS) {
+    if (l.kind !== "cct" || l.state.color_mode !== "circadian") continue;
+    const target = clamp(k, l.min_k, l.max_k);
+    if (Math.abs(target - l.state.temp) >= 15) apply(l, { temp: target }, "circadian");
+  }
+}
+
+// ---------- Энергия ----------
+const energy = { lastSim: simNow(), tariff: 6.0 };
+const lampPower = l => !l.state.is_on ? (l.kind === "onoff" ? 0 : STANDBY_W)
+  : l.kind === "onoff" ? l.rated_w : l.rated_w * l.state.brightness / 100;
+
+function energyLoop() {
+  const t = simNow();
+  const dt = Math.max(0, (t - energy.lastSim) / 1000);
+  energy.lastSim = t;
+  for (const l of LAMPS) {
+    const wh = lampPower(l) * dt / 3600;
+    l.wh += wh;
+    roomById(l.room).wh += wh;
+  }
+  dirty = true;
+}
+
+// =====================================================================
+// Отрисовка
+// =====================================================================
+const plan = $("#plan"), panel = $("#panel"), board = $("#board");
+let selected = ROOMS[0];
+let hoverPin = null;
+const ui = { rooms: {}, lamps: {}, pins: {} };
+
+// Что светит лампа сейчас — по значениям на ножках, как увидел бы глаз
+function lampLook(l) {
+  const d = l.duty;
+  const rel = l.pins.relay != null ? d.relay : 1;
+  let lin, k;
+  if (l.kind === "cct") {
+    const sum = d.warm + d.cool;
+    lin = sum * rel;
+    k = sum > 1e-4 ? K_MIN + (d.cool / sum) * (K_MAX - K_MIN) : l.state.temp;
+  } else if (l.kind === "dimmable") { lin = d.pwm * rel; k = 2900; }
+  else { lin = rel; k = 4000; }
+  return { vis: Math.pow(clamp(lin, 0, 1), 1 / GAMMA), k };
+}
+
+function pinOwners() {
+  const map = {};
+  for (const l of LAMPS) for (const [role, pin] of Object.entries(l.pins)) map[pin] = { lamp: l, role };
+  return map;
+}
+const OWNERS = pinOwners();
+
+function pinDuty(owner) {
+  const d = owner.lamp.duty;
+  return owner.role === "relay" ? d.relay : d[owner.role];
+}
+
+function buildPlan() {
+  plan.innerHTML = "";
+  for (const r of ROOMS) {
+    const el = document.createElement("div");
+    el.className = "room";
+    el.style.gridArea = r.area;
+    el.innerHTML = `<div class="room-window"></div>
+      <div class="room-head"><b>${r.name}</b><span></span></div>
+      <div class="room-foot"></div>`;
+    el.addEventListener("click", () => { selected = r; buildPanel(); dirty = true; });
+    for (const l of lampsOf(r)) {
+      const pool = document.createElement("div");
+      pool.className = "pool";
+      const size = 90 + l.rated_w * 9;
+      Object.assign(pool.style, { left: l.pos[0] + "%", top: l.pos[1] + "%", width: size + "px", height: size + "px" });
+      const lamp = document.createElement("div");
+      lamp.className = "lamp";
+      Object.assign(lamp.style, { left: l.pos[0] + "%", top: l.pos[1] + "%" });
+      lamp.innerHTML = `<div class="bulb" title="${l.name}: вкл/выкл"></div><span class="lamp-label">${l.name}</span>`;
+      lamp.querySelector(".bulb").addEventListener("click", e => {
+        e.stopPropagation();
+        selected = r; buildPanel();
+        apply(l, { is_on: !l.state.is_on });
+      });
+      el.append(pool, lamp);
+      ui.lamps[l.id] = { pool, bulb: lamp.querySelector(".bulb") };
+    }
+    plan.append(el);
+    ui.rooms[r.id] = { el, win: el.querySelector(".room-window"), head: el.querySelector(".room-head span"), foot: el.querySelector(".room-foot") };
+  }
+}
+
+function buildBoard() {
+  board.innerHTML = "";
+  let free = 0;
+  for (let i = 0; i < HEADER.length; i += 2) {
+    const row = document.createElement("div");
+    row.className = "prow";
+    const cells = [HEADER[i], HEADER[i + 1]].map((p, side) => {
+      const [phys, type, bcm] = p;
+      const pin = document.createElement("div");
+      const label = document.createElement("div");
+      label.className = "plabel " + (side === 0 ? "l" : "r");
+      let cls = "pin", text = "", info = `Контакт ${phys}`;
+      if (type === "5v") { cls += " p5v"; text = "5V"; info += " · питание 5 В"; }
+      else if (type === "3v3") { cls += " p3v"; text = "3V3"; info += " · питание 3.3 В"; }
+      else if (type === "gnd") { cls += " gnd"; text = "GND"; info += " · земля"; }
+      else if (type === "id") { cls += " id"; text = bcm; info += " · служебная (EEPROM)"; }
+      else if (bcm === 2 || bcm === 3) { cls += " i2c"; text = `GPIO${bcm} ${bcm === 2 ? "SDA" : "SCL"}`; info += ` · GPIO${bcm} · шина I2C (${bcm === 2 ? "данные" : "такт"}) — датчики`; }
+      else if (OWNERS[bcm]) {
+        const o = OWNERS[bcm];
+        cls += " used"; label.classList.add("used");
+        text = `GPIO${bcm} ${o.lamp.name} · ${ROLE_NAMES[o.role]}`;
+        info += ` · GPIO${bcm} → ${o.lamp.name} (${roomById(o.lamp.room).name}), ${ROLE_NAMES[o.role]}`;
+      } else { text = `GPIO${bcm}`; info += ` · GPIO${bcm} · свободна`; if (ALLOWED_PINS.includes(bcm)) free++; }
+      pin.className = cls;
+      label.textContent = text;
+      pin.addEventListener("mouseenter", () => { hoverPin = { info, bcm: OWNERS[bcm] ? bcm : null }; highlightLamp(bcm); });
+      pin.addEventListener("mouseleave", () => { hoverPin = null; highlightLamp(null); });
+      if (type === "gpio" && OWNERS[bcm]) ui.pins[bcm] = pin;
+      return { pin, label };
+    });
+    row.append(cells[0].label, cells[0].pin, cells[1].pin, cells[1].label);
+    board.append(row);
+  }
+  $("#boardSummary").textContent = `Ножек занято: ${ALLOWED_PINS.length - free} из ${ALLOWED_PINS.length} · свободно ${free}`;
+}
+
+function highlightLamp(bcm) {
+  for (const p of Object.values(ui.pins)) p.classList.remove("hl");
+  document.querySelectorAll(".lamp-row.flash").forEach(e => e.classList.remove("flash"));
+  if (bcm == null || !OWNERS[bcm]) return;
+  const lamp = OWNERS[bcm].lamp;
+  for (const pin of Object.values(lamp.pins)) ui.pins[pin]?.classList.add("hl");
+  panel.querySelector(`.lamp-row[data-lamp="${lamp.id}"]`)?.classList.add("flash");
+}
+
+function buildCircStrip() {
+  const strip = $("#circ");
+  strip.innerHTML = "";
+  for (let i = 0; i < 96; i++) {
+    const c = kelvinToRgb(curveK(i / 4));
+    const seg = document.createElement("div");
+    seg.style.background = `rgb(${c})`;
+    strip.append(seg);
+  }
+  const mark = document.createElement("span");
+  mark.className = "circ-mark";
+  mark.id = "circMark";
+  strip.append(mark);
+}
+
+// ---------- Пульт комнаты ----------
+function buildPanel() {
+  const r = selected, lamps = lampsOf(r);
+  const hasCct = lamps.some(l => l.kind === "cct");
+  const hasDim = lamps.some(l => l.kind !== "onoff");
+  const s = r.sensor;
+  panel.innerHTML = `
+    <div class="panel-head">
+      <h2>${r.name}</h2>
+      <span class="muted">${lamps.length} ${plural(lamps.length, "светильник", "светильника", "светильников")} · ${s ? "датчик " + s.name : "без датчика"}</span>
+    </div>
+    <div class="grid2">
+      <div class="box">
+        <h3>Вся комната</h3>
+        <div class="row">
+          <button data-act="room-on">Включить всё</button>
+          <button data-act="room-off">Выключить всё</button>
+        </div>
+        ${hasDim ? `<div class="row"><label>Яркость</label><input class="grow" type="range" min="0" max="100" data-act="room-bright"><span class="val" data-v="room-bright"></span></div>` : ""}
+        ${hasCct ? `<div class="row"><label>Оттенок</label><input class="grow temp-range" type="range" min="${K_MIN}" max="${K_MAX}" step="50" data-act="room-temp"><span class="val" data-v="room-temp"></span></div>` : ""}
+        <div class="row"><label>Режим яркости</label>
+          <div class="seg" data-seg="room-mode">
+            <button data-act="room-mode" data-mode="manual">Ручной</button>
+            <button data-act="room-mode" data-mode="auto" ${s ? "" : 'disabled title="В комнате нет датчика"'}>Авто</button>
+            <button data-act="room-mode" data-mode="schedule">Расписание</button>
+          </div>
+          <span class="warn" data-v="room-mixed"></span>
+        </div>
+        ${hasCct ? `<div class="row"><label>Режим оттенка</label>
+          <div class="seg" data-seg="room-cmode">
+            <button data-act="room-cmode" data-mode="manual">Ручной</button>
+            <button data-act="room-cmode" data-mode="circadian">☀/☾ Циркадный</button>
+          </div></div>` : ""}
+        ${s ? `<div class="row"><label>Цель авто</label><input class="grow" type="range" min="50" max="800" step="10" data-act="room-target"><span class="val" data-v="room-target"></span></div>` : ""}
+        <div class="row"><label>Расписание</label>
+          с <input type="time" data-act="sch-on" value="${r.schedule.on}">
+          до <input type="time" data-act="sch-off" value="${r.schedule.off}">
+          ${hasDim ? `<input type="number" min="1" max="100" style="width:64px" data-act="sch-bright" value="${r.schedule.brightness}"> %` : ""}
+        </div>
+      </div>
+      <div class="box">
+        <h3>Датчик освещённости</h3>
+        ${s ? `
+          <div class="row"><label>Сейчас</label><b class="val" style="text-align:left" data-v="lux"></b><span class="status" data-v="sstatus"></span></div>
+          <div class="note">${s.name} · ${s.bus}. Висит у окна и меряет дневной свет.</div>
+          <div class="row" style="margin-top:12px"><label>Свет за окном</label><input class="grow" type="range" min="0" max="1000" step="10" data-act="lux"><span class="val" data-v="lux-ovr"></span></div>
+          <div class="row">
+            <label></label>
+            <label style="min-width:0;color:var(--text)"><input type="checkbox" data-act="lux-auto"> Суточный цикл</label>
+            <span class="grow"></span>
+            <button class="danger" data-act="fault">✂ Оборвать провод</button>
+          </div>
+          <div class="note" data-v="auto-note"></div>`
+        : `<div class="note">В этой комнате нет датчика, поэтому авто-режим недоступен (сервер ответил бы 409 «в комнате нет датчика»).</div>`}
+      </div>
+    </div>
+    <h3>Светильники</h3>
+    <div class="lamps">
+      ${lamps.map(l => `
+        <div class="lamp-row" data-lamp="${l.id}">
+          <div class="lr-name">
+            <span class="dot" data-v="dot"></span>
+            <label class="switch"><input type="checkbox" data-act="on"><span></span></label>
+            <div><b>${l.name}</b><br><small>${KIND_NAMES[l.kind]} · ${l.rated_w} Вт</small></div>
+          </div>
+          <div class="lr-ctl">${l.kind !== "onoff"
+            ? `<input type="range" min="0" max="100" data-act="bright"><span class="val" data-v="bright"></span>`
+            : `<span>только вкл/выкл</span>`}</div>
+          <div class="lr-ctl">${l.kind === "cct"
+            ? `<input class="temp-range" type="range" min="${l.min_k}" max="${l.max_k}" step="50" data-act="temp"><span class="val" data-v="temp"></span>`
+            : `<span>оттенок фиксированный</span>`}</div>
+          <div class="lr-modes">
+            <select data-act="mode">
+              <option value="manual">Ручной</option>
+              <option value="auto" ${s ? "" : "disabled"}>Авто</option>
+              <option value="schedule">Расписание</option>
+            </select>
+            ${l.kind === "cct" ? `<select data-act="cmode"><option value="manual">Оттенок: ручной</option><option value="circadian">Оттенок: циркадный</option></select>` : ""}
+            <button data-act="identify">Мигнуть</button>
+          </div>
+          <div class="pins" data-v="pins"></div>
+        </div>`).join("")}
+    </div>`;
+  updatePanel(true);
+}
+
+function plural(n, one, few, many) {
+  const m10 = n % 10, m100 = n % 100;
+  return m10 === 1 && m100 !== 11 ? one : m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20) ? few : many;
+}
+
+function setVal(el, v) { if (el && document.activeElement !== el) el.value = v; }
+function setChecked(el, v) { if (el) el.checked = v; }
+
+function updatePanel() {
+  const r = selected, lamps = lampsOf(r), q = s => panel.querySelector(s);
+  const on = lamps.filter(l => l.state.is_on);
+  const dim = lamps.filter(l => l.kind !== "onoff");
+  const cct = lamps.filter(l => l.kind === "cct");
+  const avgB = dim.length ? Math.round(dim.reduce((a, l) => a + (l.state.is_on ? l.state.brightness : 0), 0) / dim.length) : 0;
+  const avgK = cct.length ? Math.round(cct.reduce((a, l) => a + l.state.temp, 0) / cct.length / 50) * 50 : 0;
+  setVal(q('[data-act="room-bright"]'), avgB);
+  if (q('[data-v="room-bright"]')) q('[data-v="room-bright"]').textContent = avgB + " %";
+  setVal(q('[data-act="room-temp"]'), avgK);
+  if (q('[data-v="room-temp"]')) q('[data-v="room-temp"]').textContent = avgK + " K";
+
+  const modes = new Set(lamps.map(l => l.state.mode));
+  panel.querySelectorAll('[data-seg="room-mode"] button').forEach(b => b.classList.toggle("on", modes.size === 1 && modes.has(b.dataset.mode)));
+  q('[data-v="room-mixed"]').textContent = modes.size > 1 ? "у ламп разные режимы" : "";
+  const cmodes = new Set(cct.map(l => l.state.color_mode));
+  panel.querySelectorAll('[data-seg="room-cmode"] button').forEach(b => b.classList.toggle("on", cmodes.size === 1 && cmodes.has(b.dataset.mode)));
+
+  setVal(q('[data-act="room-target"]'), r.target_lux);
+  if (q('[data-v="room-target"]')) q('[data-v="room-target"]').textContent = r.target_lux + " лк";
+
+  const s = r.sensor;
+  if (s) {
+    q('[data-v="lux"]').textContent = s.status === "ok" ? fmt(s.lux) + " лк" : "—";
+    const st = q('[data-v="sstatus"]');
+    st.className = "status" + (s.status === "ok" ? "" : " err");
+    st.innerHTML = `<i></i>${s.status === "ok" ? "работает" : "не отвечает"}`;
+    setVal(q('[data-act="lux"]'), Math.round(s.override ?? s.lux));
+    q('[data-v="lux-ovr"]').textContent = s.override != null ? s.override + " лк" : "авто";
+    setChecked(q('[data-act="lux-auto"]'), s.override == null);
+    q('[data-act="fault"]').classList.toggle("on", s.fault);
+    q('[data-act="fault"]').textContent = s.fault ? "🔌 Починить провод" : "✂ Оборвать провод";
+    const autoLamps = lamps.filter(l => l.state.mode === "auto").length;
+    q('[data-v="auto-note"]').innerHTML = !autoLamps ? "Ни одна лампа комнаты не в авто-режиме."
+      : s.status !== "ok" ? `<span class="warn">Датчик не отвечает — авто-лампы держат последнюю яркость.</span>`
+      : `Авто-режим: цель ${r.target_lux} лк, за окном ${fmt(s.lux)} лк → ${r.autoOn ? "свет нужен" : "достаточно светло"}.`;
+  }
+
+  for (const l of lamps) {
+    const row = q(`.lamp-row[data-lamp="${l.id}"]`);
+    if (!row) continue;
+    const st = l.state, rq = s => row.querySelector(s);
+    setChecked(rq('[data-act="on"]'), st.is_on);
+    setVal(rq('[data-act="bright"]'), st.brightness);
+    if (rq('[data-v="bright"]')) rq('[data-v="bright"]').textContent = st.brightness + " %";
+    setVal(rq('[data-act="temp"]'), st.temp);
+    if (rq('[data-v="temp"]')) rq('[data-v="temp"]').textContent = st.temp + " K";
+    setVal(rq('[data-act="mode"]'), st.mode);
+    setVal(rq('[data-act="cmode"]'), st.color_mode);
+  }
+}
+
+// Обновления каждый кадр: свечение ламп, ножки, комнаты
+function renderFrame() {
+  const h = simHours();
+  const out = outdoorLux(h);
+  for (const r of ROOMS) {
+    const u = ui.rooms[r.id];
+    const day = clamp(out * (r.sensor ? r.sensor.window : .3) / 900, 0, 1);
+    const base = [15 + day * 55, 19 + day * 58, 28 + day * 60].map(Math.round);
+    u.el.style.backgroundColor = `rgb(${base})`;
+    const sky = out <= 0 ? [20, 30, 60] : out < 60 ? [240, 140, 80] : [140, 200, 255];
+    u.win.style.backgroundColor = `rgb(${sky})`;
+    u.el.classList.toggle("sel", r === selected);
+  }
+  for (const l of LAMPS) {
+    const { vis, k } = lampLook(l);
+    const c = kelvinToRgb(k);
+    const u = ui.lamps[l.id];
+    const lit = c.map(v => Math.round(40 + (v - 40) * vis));
+    u.bulb.style.background = `rgb(${lit})`;
+    u.bulb.style.boxShadow = vis > .01 ? `0 0 ${6 + vis * 26}px ${2 + vis * 8}px rgba(${c},${.35 + vis * .5})` : "none";
+    u.pool.style.background = `radial-gradient(circle, rgba(${c},${.55 * vis}) 0%, rgba(${c},${.18 * vis}) 40%, transparent 70%)`;
+  }
+  for (const [bcm, el] of Object.entries(ui.pins)) {
+    const v = pinDuty(OWNERS[bcm]);
+    el.style.boxShadow = v > .01 ? `0 0 ${3 + v * 9}px ${v * 3}px rgba(120,255,170,${.3 + v * .6})` : "none";
+    el.style.background = v > .01 ? `rgb(${45 + v * 80},${106 + v * 140},${79 + v * 60})` : "";
+  }
+  if (hoverPin) {
+    $("#pinInfo").textContent = hoverPin.info + (hoverPin.bcm != null
+      ? (OWNERS[hoverPin.bcm].role === "relay" ? ` · сейчас: ${pinDuty(OWNERS[hoverPin.bcm]) ? "ON" : "OFF"}` : ` · duty ${pinDuty(OWNERS[hoverPin.bcm]).toFixed(2)}`)
+      : "");
+  }
+  // живые значения ножек в пульте
+  for (const l of lampsOf(selected)) {
+    const row = panel.querySelector(`.lamp-row[data-lamp="${l.id}"]`);
+    if (!row) continue;
+    row.querySelector('[data-v="pins"]').innerHTML = Object.entries(l.pins).map(([role, pin]) => {
+      const v = role === "relay" ? (l.duty.relay ? "ON" : "OFF") : l.duty[role].toFixed(2);
+      return `GPIO${pin} ${ROLE_NAMES[role]}: <b>${v}</b>`;
+    }).join(" · ") + ` · ${fmt(lampPower(l), 1)} Вт`;
+    const { vis, k } = lampLook(l);
+    const c = kelvinToRgb(k);
+    row.querySelector('[data-v="dot"]').style.background = `rgb(${c.map(v => Math.round(40 + (v - 40) * vis))})`;
+  }
+}
+
+// Обновления по изменению состояния: подписи, журнал, энергия
+function renderState() {
+  const t = new Date(simNow());
+  $("#clock").textContent = `${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}`;
+  $("#clockSub").textContent = t.toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" })
+    + (clock.speed > 1 ? ` · время ускорено ×${clock.speed}` : "");
+  document.querySelectorAll("#speedSeg button").forEach(b => b.classList.toggle("on", +b.dataset.speed === clock.speed));
+  const h = simHours();
+  $("#circMark").style.left = `calc(${h / 24 * 100}% - 1px)`;
+  $("#circK").textContent = Math.round(curveK(h)) + " K";
+  $("#fadeVal").textContent = fadeMs + " мс";
+
+  for (const r of ROOMS) {
+    const lamps = lampsOf(r), on = lamps.filter(l => l.state.is_on).length;
+    const w = lamps.reduce((a, l) => a + lampPower(l), 0);
+    const u = ui.rooms[r.id];
+    u.head.textContent = `💡 ${on}/${lamps.length} · ${fmt(w, 1)} Вт`;
+    const modes = [...new Set(lamps.map(l => MODE_NAMES[l.state.mode]))].join(", ");
+    const sens = !r.sensor ? "без датчика" : r.sensor.status === "ok" ? `☀ ${fmt(r.sensor.lux)} лк` : "⚠ датчик не отвечает";
+    u.foot.textContent = `${sens} · ${modes}`;
+  }
+
+  const totalW = LAMPS.reduce((a, l) => a + lampPower(l), 0);
+  const totalWh = ROOMS.reduce((a, r) => a + r.wh, 0);
+  $("#eNow").textContent = fmt(totalW, 1) + " Вт";
+  $("#eWh").textContent = totalWh < 1000 ? fmt(totalWh, 1) + " Вт·ч" : fmt(totalWh / 1000, 2) + " кВт·ч";
+  $("#eRub").textContent = fmt(totalWh / 1000 * energy.tariff, 2) + " ₽";
+  const maxWh = Math.max(...ROOMS.map(r => r.wh), 1e-9);
+  $("#eRooms").innerHTML = ROOMS.map(r => `
+    <div class="erow"><span>${r.name}</span><div class="ebar"><div style="width:${r.wh / maxWh * 100}%"></div></div>
+    <span class="val">${r.wh < 1000 ? fmt(r.wh, 1) + " Вт·ч" : fmt(r.wh / 1000, 2) + " кВт·ч"}</span></div>`).join("");
+
+  $("#log").innerHTML = events.map(e => `<div><time>${e.t}</time><span class="${e.kind}">${e.text}</span></div>`).join("")
+    || `<div><time></time><span class="muted">Пока тихо.</span></div>`;
+
+  updatePanel();
+}
+
+// =====================================================================
+// Обработчики пульта
+// =====================================================================
+panel.addEventListener("input", e => {
+  const el = e.target, act = el.dataset.act, r = selected;
+  const row = el.closest(".lamp-row"), l = row && LAMPS.find(x => x.id === +row.dataset.lamp);
+  if (act === "room-bright") roomCommand(r, { brightness: +el.value });
+  else if (act === "room-temp") roomCommand(r, { temp: +el.value });
+  else if (act === "room-target") { r.target_lux = +el.value; dirty = true; }
+  else if (act === "lux") { r.sensor.override = +el.value; r.sensor.lux = +el.value; dirty = true; }
+  else if (act === "bright") apply(l, { brightness: +el.value });
+  else if (act === "temp") apply(l, { temp: +el.value });
+});
+
+panel.addEventListener("change", e => {
+  const el = e.target, act = el.dataset.act, r = selected;
+  const row = el.closest(".lamp-row"), l = row && LAMPS.find(x => x.id === +row.dataset.lamp);
+  if (act === "on") apply(l, { is_on: el.checked });
+  else if (act === "mode") { setMode(l, el.value); runLoops(); }
+  else if (act === "cmode") { l.state.color_mode = el.value; runLoops(); }
+  else if (act === "lux-auto") { r.sensor.override = el.checked ? null : Math.round(r.sensor.lux); dirty = true; }
+  else if (act === "sch-on" && el.value) { r.schedule.on = el.value; runLoops(); }
+  else if (act === "sch-off" && el.value) { r.schedule.off = el.value; runLoops(); }
+  else if (act === "sch-bright") { r.schedule.brightness = clamp(+el.value || 1, 1, 100); runLoops(); }
+});
+
+panel.addEventListener("click", e => {
+  const el = e.target.closest("button");
+  if (!el) return;
+  const act = el.dataset.act, r = selected;
+  const row = el.closest(".lamp-row"), l = row && LAMPS.find(x => x.id === +row.dataset.lamp);
+  if (act === "room-on") roomCommand(r, { is_on: true });
+  else if (act === "room-off") roomCommand(r, { is_on: false });
+  else if (act === "room-mode") { for (const x of lampsOf(r)) setMode(x, el.dataset.mode); log(`${r.name}: режим яркости «${MODE_NAMES[el.dataset.mode]}»`); runLoops(); }
+  else if (act === "room-cmode") {
+    for (const x of lampsOf(r)) if (x.kind === "cct") x.state.color_mode = el.dataset.mode;
+    log(`${r.name}: оттенок — ${el.dataset.mode === "circadian" ? "циркадный" : "ручной"}`);
+    runLoops();
+  }
+  else if (act === "fault") { r.sensor.fault = !r.sensor.fault; log(`Симуляция: ${r.sensor.fault ? "оборван" : "починен"} провод датчика «${r.name}»`); dirty = true; }
+  else if (act === "identify") identify(l);
+});
+
+$("#speedSeg").addEventListener("click", e => {
+  const b = e.target.closest("button");
+  if (b) { setSpeed(+b.dataset.speed); log(`Скорость времени ×${b.dataset.speed}`); }
+});
+$("#todBtns").addEventListener("click", e => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  if (b.dataset.tod === "now") { clock.baseSim = Date.now(); clock.baseReal = Date.now(); clock.speed = 1; energy.lastSim = simNow(); log("Время: текущее"); }
+  else { const [hh, mm] = b.dataset.tod.split(":").map(Number); setTimeOfDay(hh, mm); log(`Время перемотано на ${pad(hh)}:${pad(mm)}`); }
+  runLoops();
+});
+const fade = $("#fade");
+fade.value = fadeMs;
+fade.addEventListener("input", () => { fadeMs = +fade.value; dirty = true; });
+const tariff = $("#tariff");
+tariff.value = energy.tariff;
+tariff.addEventListener("input", () => { energy.tariff = Math.max(0, +tariff.value || 0); dirty = true; });
+
+// =====================================================================
+// Запуск
+// =====================================================================
+function runLoops() { sensorLoop(); autoLoop(); scheduleLoop(); circadianLoop(); dirty = true; }
+
+buildPlan();
+buildBoard();
+buildCircStrip();
+buildPanel();
+for (const l of LAMPS) startTransition(l, targetDuty(l), 0);
+runLoops();
+log("Симулятор запущен: 4 комнаты, 10 светильников, 3 датчика");
+
+setInterval(sensorLoop, 2000);
+setInterval(autoLoop, 2000);
+setInterval(scheduleLoop, 1000);
+setInterval(circadianLoop, 500);
+setInterval(energyLoop, 1000);
+setInterval(() => { dirty = true; }, 1000);   // часы
+
+(function frame(now) {
+  stepTransitions(now);
+  renderFrame();
+  if (dirty) { dirty = false; renderState(); }
+  requestAnimationFrame(frame);
+})(performance.now());
+</script>
+</body>
+</html>
