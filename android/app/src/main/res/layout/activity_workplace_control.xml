@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/main"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#9C6CA6"
+    android:orientation="vertical"
+    android:padding="24dp"
+    tools:context=".WorkplaceControl">
+
+    <!-- Верхняя панель: Список и кнопка Настройки -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginTop="32dp">
+
+        <!-- 1. Выпадающий список -->
+        <Spinner
+            android:id="@+id/spinnerWorkplaces"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:backgroundTint="#FFFFFF" />
+
+        <!-- 2. Кнопка Настройки -->
+        <Button
+            android:id="@+id/btnSettings"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Настройки"
+            android:layout_marginStart="8dp"/>
+    </LinearLayout>
+
+    <!-- 3. Индикатор (Прямоугольник) -->
+    <View
+        android:id="@+id/colorIndicator"
+        android:layout_width="200dp"
+        android:layout_height="200dp"
+        android:layout_gravity="center"
+        android:layout_marginTop="48dp"
+        android:layout_marginBottom="48dp"
+        android:background="#FFFFFF" />
+
+    <!-- 4. Чекбокс "Авто режим" -->
+    <CheckBox
+        android:id="@+id/cbAutoMode"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Авто режим"
+        android:textColor="#000000"
+        android:textSize="18sp"
+        android:buttonTint="#000000" />
+
+    <!-- 5. Ползунок "Яркость" -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="ЯРКОСТЬ"
+        android:textColor="#000000"
+        android:textSize="18sp"
+        android:layout_marginTop="16dp"/>
+
+    <SeekBar
+        android:id="@+id/sbBrightness"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:max="100"
+        android:progress="50"
+        android:progressTint="#FFFFFF"
+        android:thumbTint="#000000"/>
+
+    <!-- 6. Ползунок "Теплота света" -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="ТЕПЛО"
+        android:textColor="#000000"
+        android:textSize="18sp"
+        android:layout_marginTop="16dp"/>
+
+    <SeekBar
+        android:id="@+id/sbWarmth"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:max="100"
+        android:progress="50"
+        android:progressTint="#FFFFFF"
+        android:thumbTint="#000000"/>
+
+</LinearLayout>
