@@ -4,6 +4,10 @@ from typing import Literal
 from pydantic import BaseModel
 
 
+class ErrorOut(BaseModel):
+    detail: str
+
+
 class HealthOut(BaseModel):
     name: str
     version: str
