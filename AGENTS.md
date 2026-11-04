@@ -48,7 +48,7 @@
 
 - ✅ Документация: архитектура, модель, API.
 - ✅ Веб-эмулятор — [simulator/index.html](simulator/index.html): один файл, работает без устройства. **Построен на старой модели** (режим у каждой лампы, флаг `is_on`, расписания), его нужно перевести на модель из `docs/model.md`: комната — единица управления, яркость 0 = выключено.
-- 🟡 Устройство (`device/`): есть каркас. Пакет `lighting/` разбит на модули из `docs/architecture.md`, работают конфиг, `GET /health`, проверка `X-API-Key`, `GET /auth/check`, `hal.Clock` и `sim.VirtualClock`. Остальные модули пока пустые, в них только docstring с назначением.
+- 🟡 Устройство (`device/`): есть каркас. Пакет `lighting/` разбит на модули из `docs/architecture.md`, работают конфиг, `GET /health`, проверка `X-API-Key`, `GET /auth/check`. Драйверы: `hal` — интерфейсы `LightDriver`, `SensorDriver`, `PowerMeter`, `Clock`; `sim` — виртуальные часы, лампы, датчик и счётчик мощности; `hardware` — системные часы, лампа на gpiozero, датчик TCS34725 на I2C и расчётный счётчик мощности. `domain`, `policy`, `telemetry`, `storage` пока пустые, в них только docstring с назначением.
 - ⏳ Android-клиент (`android/`).
 
 ## Ключевые правила
