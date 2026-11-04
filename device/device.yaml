@@ -1,0 +1,94 @@
+# Что физически подключено к Raspberry Pi.
+#
+# Этот файл — источник реестров ламп и датчиков (docs/model.md).
+# При первом запуске устройство заполняет из него таблицы в базе.
+# Комнаты здесь не описаны: их создаёт пользователь через API.
+#
+# Нумерация ножек — BCM (GPIO17 = физический контакт 11).
+# Ножки 2 и 3 заняты шиной I2C, их для ламп не используем.
+
+site:
+  name: "Квартира"
+  tariff_rub_per_kwh: 6.0
+
+# kind:
+#   cct      — CCT-лента: реле + тёплый канал + холодный канал (3 ножки)
+#   dimmable — один ШИМ-канал, оттенок фиксированный (1 ножка, реле необязательно)
+#   onoff    — только реле, яркость не регулируется (1 ножка)
+lamps:
+  - id: 1
+    name: "Люстра"
+    kind: cct
+    pins: { relay: 5, warm: 17, cool: 27 }
+    max_power_w: 24
+  - id: 2
+    name: "Торшер"
+    kind: cct
+    pins: { relay: 22, warm: 18, cool: 25 }
+    max_power_w: 10
+  - id: 3
+    name: "Подсветка ТВ"
+    kind: dimmable
+    pins: { relay: 4, pwm: 12 }
+    max_power_w: 6
+  - id: 4
+    name: "Бра"
+    kind: dimmable
+    pins: { pwm: 8 }
+    max_power_w: 4
+  - id: 5
+    name: "Основной свет"
+    kind: cct
+    pins: { relay: 16, warm: 20, cool: 21 }
+    max_power_w: 18
+  - id: 6
+    name: "Над столом"
+    kind: cct
+    pins: { relay: 26, warm: 19, cool: 10 }
+    max_power_w: 12
+  - id: 7
+    name: "Рабочая зона"
+    kind: dimmable
+    pins: { pwm: 9 }
+    max_power_w: 5
+  - id: 8
+    name: "Потолок"
+    kind: cct
+    pins: { relay: 6, warm: 23, cool: 24 }
+    max_power_w: 15
+  - id: 9
+    name: "Ночник"
+    kind: dimmable
+    pins: { pwm: 13 }
+    max_power_w: 3
+  - id: 10
+    name: "Светильник"
+    kind: onoff
+    pins: { relay: 11 }
+    max_power_w: 8
+
+# Датчик — TCS34725 на шине I2C-1, адрес 0x29 (фиксированный).
+# Если датчиков больше одного, каждый висит на своём канале мультиплексора
+# TCA9548A (адрес 0x70): тогда укажите mux_channel 1..8, иначе null.
+sensors:
+  - id: 1
+    name: "Гостиная"
+    chip: TCS34725
+    bus: "I2C-1"
+    address: 0x29
+    mux_channel: null
+    window: 1.0          # доля уличного света, попадающая в комнату (для sim)
+  - id: 2
+    name: "Кухня"
+    chip: TCS34725
+    bus: "I2C-1"
+    address: 0x29
+    mux_channel: 1
+    window: 0.8
+  - id: 3
+    name: "Спальня"
+    chip: TCS34725
+    bus: "I2C-1"
+    address: 0x29
+    mux_channel: 2
+    window: 0.6
