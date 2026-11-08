@@ -5,5 +5,8 @@
 """
 
 from lighting.hal.clock import Clock
+from lighting.hal.light import LightDriver
+from lighting.hal.power import PowerMeter
+from lighting.hal.sensor import SensorDriver, SensorError, SensorReading
 
-__all__ = ["Clock"]
+__all__ = ["Clock", "LightDriver", "PowerMeter", "SensorDriver", "SensorError", "SensorReading"]
