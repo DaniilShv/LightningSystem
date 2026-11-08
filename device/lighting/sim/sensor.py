@@ -42,14 +42,12 @@ class VirtualSensor(SensorDriver):
         clock: Clock,
         window: float,
         lamps: Sequence[VirtualLight] = (),
-        lux_at_full: float = 300.0,
         noise: float = 0.0,
         rng: random.Random | None = None,
     ) -> None:
         self._clock = clock
         self._window = window
         self._lamps = list(lamps)
-        self._lux_at_full = lux_at_full
         self._noise = noise
         self._rng = rng or random.Random(0)
         self._broken = False
@@ -85,7 +83,7 @@ class VirtualSensor(SensorDriver):
             lamp_kelvin = lamp.kelvin
             if lamp_kelvin is None:
                 continue
-            sources.append((self._lux_at_full * lamp.duty, lamp_kelvin))
+            sources.append((lamp.lux, lamp_kelvin))
         return sources
 
     def _with_inertia(self, lux: float, now: datetime) -> float:

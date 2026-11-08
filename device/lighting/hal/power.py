@@ -9,5 +9,8 @@ class PowerMeter(ABC):
     """
 
     @abstractmethod
-    def total_power_w(self) -> float:
-        """Суммарная мощность всех ламп прямо сейчас, Вт."""
+    def power_by_lamp_w(self) -> dict[int, float]:
+        """Мощность каждой лампы прямо сейчас: {id лампы: Вт}.
+
+        Энергия учитывается по лампам (docs/model.md), суммарная мощность — сумма значений.
+        """

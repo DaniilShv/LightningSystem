@@ -45,11 +45,9 @@ def test_dark_lamp_adds_no_light() -> None:
 
 
 def test_lamp_light_is_added_to_readings() -> None:
-    lamp = VirtualLight(max_power_w=10)
+    lamp = VirtualLight(max_power_w=10, lux_at_full=300)
     lamp.set_output(relay=True, warm=0.5, cool=0.5)
-    sensor = VirtualSensor(
-        clock=FixedClock(NIGHT), window=1.0, lamps=[lamp], lux_at_full=300
-    )
+    sensor = VirtualSensor(clock=FixedClock(NIGHT), window=1.0, lamps=[lamp])
 
     reading = sensor.read()
 
@@ -57,12 +55,23 @@ def test_lamp_light_is_added_to_readings() -> None:
     assert reading.cct == 4600
 
 
+def test_each_lamp_adds_its_own_lux_and_shade() -> None:
+    warm = VirtualLight(max_power_w=10, lux_at_full=100)
+    cool = VirtualLight(max_power_w=10, lux_at_full=300)
+    warm.set_output(relay=True, warm=1.0, cool=0.0)
+    cool.set_output(relay=True, warm=0.0, cool=1.0)
+    sensor = VirtualSensor(clock=FixedClock(NIGHT), window=1.0, lamps=[warm, cool])
+
+    reading = sensor.read()
+
+    assert reading.lux == 400
+    assert reading.cct == 5550
+
+
 def test_cct_mixes_daylight_and_lamp() -> None:
-    lamp = VirtualLight(max_power_w=10)
+    lamp = VirtualLight(max_power_w=10, lux_at_full=300)
     lamp.set_output(relay=True, warm=0.5, cool=0.5)
-    sensor = VirtualSensor(
-        clock=FixedClock(MIDDAY), window=1.0, lamps=[lamp], lux_at_full=300
-    )
+    sensor = VirtualSensor(clock=FixedClock(MIDDAY), window=1.0, lamps=[lamp])
 
     reading = sensor.read()
 
@@ -72,9 +81,9 @@ def test_cct_mixes_daylight_and_lamp() -> None:
 
 def test_reading_fades_instead_of_jumping() -> None:
     clock = FixedClock(NIGHT)
-    lamp = VirtualLight(max_power_w=10)
+    lamp = VirtualLight(max_power_w=10, lux_at_full=300)
     lamp.set_output(relay=True, warm=0.5, cool=0.5)
-    sensor = VirtualSensor(clock=clock, window=0.0, lamps=[lamp], lux_at_full=300)
+    sensor = VirtualSensor(clock=clock, window=0.0, lamps=[lamp])
 
     assert sensor.read().lux == 300
 

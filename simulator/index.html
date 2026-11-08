@@ -8,10 +8,10 @@
   Веб-симулятор системы освещения (демо-режим).
 
   Сейчас страница работает сама по себе: всё «железо» и логика сервера
-  (лампы, ножки GPIO, датчики, плавные переходы, авто-режим, расписания,
+  (лампы, ножки GPIO, датчики, плавные переходы, авто-режим,
   циркадный режим, учёт энергии) эмулируются прямо в браузере.
-  Правила те же, что описаны в AGENTS.md (раздел «Логика»), поэтому когда появится сервер,
-  блок «Движок» заменяется подключением к /ws/state и REST API,
+  Правила и формулы те же, что описаны в docs/model.md, поэтому когда появится устройство,
+  блок «Движок» заменяется подключением к device/ по REST API,
   а отрисовка остаётся прежней.
 
   Открыть: просто открыть этот файл в браузере.
@@ -262,7 +262,7 @@ header h1 { font-size: 18px; }
 // уставка оттенка живут здесь, а не у лампы. Лампы получают уставку комнаты.
 const ROOMS = [
   { id: 1, name: "Гостиная", area: "living", target_lux: 300,
-    sensor: { name: "TCS34725", bus: "I2C-1, адрес 0x29", window: 1.0 } },
+    sensor: { name: "TCS34725", bus: "I2C-1 → мультиплексор TCA9548A (0x70), канал 0, адрес 0x29", window: 1.0 } },
   { id: 2, name: "Кухня", area: "kitchen", target_lux: 400,
     sensor: { name: "TCS34725", bus: "I2C-1 → мультиплексор TCA9548A (0x70), канал 1, адрес 0x29", window: 0.8 } },
   { id: 3, name: "Спальня", area: "bedroom", target_lux: 200,
@@ -270,18 +270,17 @@ const ROOMS = [
   { id: 4, name: "Прихожая", area: "hall", target_lux: 150, sensor: null },
 ];
 
-// kind: cct — реле + тёплый + холодный; dimmable — (реле) + один ШИМ; onoff — только реле
+// Все лампы — CCT-ленты: реле + тёплый канал + холодный канал (3 ножки).
+// lux_at_full — сколько lux даёт лампа на 100 %.
 const LAMPS = [
-  { id: 1,  room: 1, name: "Люстра",        kind: "cct",      pins: { relay: 5,  warm: 17, cool: 27 }, max_power_w: 24, pos: [50, 42] },
-  { id: 2,  room: 1, name: "Торшер",        kind: "cct",      pins: { relay: 22, warm: 18, cool: 25 }, max_power_w: 10, pos: [15, 74] },
-  { id: 3,  room: 1, name: "Подсветка ТВ",  kind: "dimmable", pins: { relay: 4,  pwm: 12 },            max_power_w: 6,  pos: [84, 78] },
-  { id: 4,  room: 1, name: "Бра",           kind: "dimmable", pins: { pwm: 8 },                        max_power_w: 4,  pos: [84, 30] },
-  { id: 5,  room: 2, name: "Основной свет", kind: "cct",      pins: { relay: 16, warm: 20, cool: 21 }, max_power_w: 18, pos: [50, 38] },
-  { id: 6,  room: 2, name: "Над столом",    kind: "cct",      pins: { relay: 26, warm: 19, cool: 10 }, max_power_w: 12, pos: [30, 74] },
-  { id: 7,  room: 2, name: "Рабочая зона",  kind: "dimmable", pins: { pwm: 9 },                        max_power_w: 5,  pos: [80, 74] },
-  { id: 8,  room: 3, name: "Потолок",       kind: "cct",      pins: { relay: 6,  warm: 23, cool: 24 }, max_power_w: 15, pos: [45, 45] },
-  { id: 9,  room: 3, name: "Ночник",        kind: "dimmable", pins: { pwm: 13 },                       max_power_w: 3,  pos: [82, 74] },
-  { id: 10, room: 4, name: "Светильник",    kind: "onoff",    pins: { relay: 11 },                     max_power_w: 8,  pos: [50, 55] },
+  { id: 1, room: 1, name: "Люстра",        pins: { relay: 5,  warm: 17, cool: 27 }, max_power_w: 24, lux_at_full: 400, pos: [50, 42] },
+  { id: 2, room: 1, name: "Торшер",        pins: { relay: 22, warm: 18, cool: 25 }, max_power_w: 10, lux_at_full: 160, pos: [15, 74] },
+  { id: 3, room: 1, name: "Бра",           pins: { relay: 4,  warm: 12, cool: 8  }, max_power_w: 4,  lux_at_full: 60,  pos: [84, 30] },
+  { id: 4, room: 2, name: "Основной свет", pins: { relay: 16, warm: 20, cool: 21 }, max_power_w: 18, lux_at_full: 300, pos: [50, 38] },
+  { id: 5, room: 2, name: "Над столом",    pins: { relay: 26, warm: 19, cool: 10 }, max_power_w: 12, lux_at_full: 200, pos: [30, 74] },
+  { id: 6, room: 3, name: "Потолок",       pins: { relay: 6,  warm: 23, cool: 24 }, max_power_w: 15, lux_at_full: 250, pos: [45, 45] },
+  { id: 7, room: 3, name: "Ночник",        pins: { relay: 7,  warm: 13, cool: 9  }, max_power_w: 3,  lux_at_full: 50,  pos: [82, 74] },
+  { id: 8, room: 4, name: "Светильник",    pins: { relay: 11, warm: 14, cool: 15 }, max_power_w: 8,  lux_at_full: 130, pos: [50, 55] },
 ];
 
 // Начальное состояние комнат, чтобы картинка сразу была «живой».
@@ -306,9 +305,10 @@ const ALLOWED_PINS = Array.from({ length: 24 }, (_, i) => i + 4); // BCM 4–27;
 
 const K_MIN = 2700, K_MAX = 6500;
 const GAMMA = 2.2;
+const DAWN_H = 7, DUSK_H = 17.5, DAY_PEAK_LUX = 900, DAY_CCT = 6500;
+const SENSOR_INERTIA_S = 1, SENSOR_NOISE = 0.02, MIN_LUX_FOR_CCT = 1;
 const CURVE = [[0, 2700], [6, 2700], [9, 5000], [13, 6000], [17, 5000], [20, 3500], [22, 2700], [24, 2700]];
-const ROLE_NAMES = { relay: "реле", warm: "тёплый", cool: "холодный", pwm: "ШИМ" };
-const KIND_NAMES = { cct: "тёплый↔холодный", dimmable: "с регулировкой", onoff: "вкл/выкл" };
+const ROLE_NAMES = { relay: "реле", warm: "тёплый", cool: "холодный" };
 const MODE_NAMES = { manual: "Ручной", auto: "Авто" };
 const CMODE_NAMES = { manual: "Ручной", circadian: "Циркадный" };
 
@@ -361,7 +361,7 @@ function setTimeOfDay(h, m) {
 }
 
 // =====================================================================
-// Движок — эмуляция драйверов и логики сервера (см. AGENTS.md, раздел «Логика»)
+// Движок — эмуляция драйверов и логики устройства (см. docs/model.md)
 // =====================================================================
 let fadeMs = 600;
 let dirty = true;
@@ -376,28 +376,24 @@ function log(text, kind = "") {
 // Состояние комнат: уставки и режимы. У лампы — только фактическая яркость и оттенок.
 for (const r of ROOMS) {
   Object.assign(r, { wh: 0 }, INITIAL_ROOMS[r.id]);
-  if (r.sensor) Object.assign(r.sensor, { lux: 0, status: "ok", fails: 0, override: null, fault: false });
+  if (r.sensor) Object.assign(r.sensor, { lux: 0, cct: null, status: "online", fails: 0, override: null, fault: false, measured: null, lastReadAt: null });
 }
 for (const l of LAMPS) {
   l.state = { brightness: 0, temp: 4000 };   // фактическое: догоняет уставку комнаты
-  l.duty = { relay: 0, warm: 0, cool: 0, pwm: 0 };
+  l.duty = { relay: 0, warm: 0, cool: 0 };
   l.tr = null;
   l.wh = 0;
 }
 
 // Яркость + температура → duty на ножках (с гамма-коррекцией)
 function targetDuty(l) {
-  const s = l.state, d = { relay: 0, warm: 0, cool: 0, pwm: 0 };
+  const s = l.state, d = { relay: 0, warm: 0, cool: 0 };
   if (s.brightness <= 0) return d;   // яркость 0 = выключено, отдельного флага нет
   d.relay = 1;
-  const b = l.kind === "onoff" ? 1 : Math.pow(s.brightness / 100, GAMMA);
-  if (l.kind === "cct") {
-    const t = clamp((s.temp - K_MIN) / (K_MAX - K_MIN), 0, 1);
-    d.warm = (1 - t) * b;
-    d.cool = t * b;
-  } else if (l.kind === "dimmable") {
-    d.pwm = b;
-  }
+  const b = Math.pow(s.brightness / 100, GAMMA);
+  const t = clamp((s.temp - K_MIN) / (K_MAX - K_MIN), 0, 1);
+  d.warm = (1 - t) * b;
+  d.cool = t * b;
   return d;
 }
 
@@ -414,7 +410,7 @@ function stepTransitions(now) {
     if (!l.tr) continue;
     const { from, to, t0, ms } = l.tr;
     const k = ms > 0 ? clamp((now - t0) / ms, 0, 1) : 1;
-    for (const ch of ["warm", "cool", "pwm"]) l.duty[ch] = from[ch] + (to[ch] - from[ch]) * k;
+    for (const ch of ["warm", "cool"]) l.duty[ch] = from[ch] + (to[ch] - from[ch]) * k;
     if (k >= 1) { l.duty.relay = to.relay; l.tr = null; }
   }
 }
@@ -424,8 +420,6 @@ function stepTransitions(now) {
 function apply(l, changes) {
   const ch = { ...changes };
   const s = l.state;
-  if (l.kind !== "cct") delete ch.temp;
-  if (l.kind === "onoff") delete ch.brightness;
   if ("brightness" in ch) ch.brightness = clamp(Math.round(ch.brightness), 0, 100);
   if ("temp" in ch) ch.temp = clamp(Math.round(ch.temp), K_MIN, K_MAX);
   Object.assign(s, ch);
@@ -436,11 +430,7 @@ function apply(l, changes) {
 
 // Уставка комнаты → все её лампы (инвариант 4: лампы получают уставку комнаты)
 function applyRoom(room) {
-  for (const l of lampsOf(room)) {
-    const ch = { brightness: room.brightness };
-    if (l.kind === "cct") ch.temp = room.color_temp_k;
-    apply(l, ch);
-  }
+  for (const l of lampsOf(room)) apply(l, { brightness: room.brightness, temp: room.color_temp_k });
 }
 
 // Ручное действие пользователя с яркостью переводит комнату в manual (инвариант 9)
@@ -470,7 +460,7 @@ function setRoomPower(room, on) {
 }
 
 function setRoomMode(room, mode) {
-  if (mode === "auto" && (!room.sensor || room.sensor.status !== "ok")) {
+  if (mode === "auto" && (!room.sensor || room.sensor.status !== "online")) {
     log(`${room.name}: авто-режим недоступен — нет датчика онлайн`, "err");
     return;
   }
@@ -487,7 +477,7 @@ function setRoomColorMode(room, mode) {
 
 function identify(l) {
   clearTimeout(l.idTimer);
-  const lit = { relay: 1, warm: .5, cool: .5, pwm: 1 }, dark = { relay: 0, warm: 0, cool: 0, pwm: 0 };
+  const lit = { relay: 1, warm: .5, cool: .5 }, dark = { relay: 0, warm: 0, cool: 0 };
   let i = 0;
   const tick = () => {
     if (i < 6) { startTransition(l, i % 2 ? lit : dark, 60); i++; l.idTimer = setTimeout(tick, 220); }
@@ -498,18 +488,42 @@ function identify(l) {
 }
 
 // ---------- Датчики ----------
+// Уличный свет — кривая из docs/model.md: от 0 на рассвете линейно до пика и обратно к закату.
 function outdoorLux(h) {
-  const rise = 7.2, set = 17.6;       // конец октября
-  if (h < rise - 0.7 || h > set + 0.7) return 0;
-  if (h < rise) return 30 * (1 - (rise - h) / 0.7);
-  if (h > set) return 30 * (1 - (h - set) / 0.7);
-  return 30 + 870 * Math.pow(Math.sin(Math.PI * (h - rise) / (set - rise)), 0.8);
+  if (h <= DAWN_H || h >= DUSK_H) return 0;
+  const noon = (DAWN_H + DUSK_H) / 2;
+  const share = h <= noon ? (h - DAWN_H) / (noon - DAWN_H) : (DUSK_H - h) / (DUSK_H - noon);
+  return DAY_PEAK_LUX * share;
 }
 
-function readLux(sensor) {
-  if (sensor.fault) throw new Error("OSError: [Errno 121] Remote I/O error");  // как smbus2 при обрыве
-  if (sensor.override != null) return sensor.override;
-  return outdoorLux(simHours()) * sensor.window * (1 + (Math.random() - .5) * .06);
+const lampDuty = l => (l.duty.relay ? l.duty.warm + l.duty.cool : 0);
+const lampKelvin = l => K_MIN + (l.duty.cool / (l.duty.warm + l.duty.cool)) * (K_MAX - K_MIN);
+
+// Что попадает на датчик комнаты: [lux, цветовая температура] дневного света и каждой горящей лампы
+function lightSources(room) {
+  const sources = [];
+  const daylight = (room.sensor.override ?? outdoorLux(simHours())) * room.sensor.window;
+  if (daylight > 0) sources.push([daylight, DAY_CCT]);
+  for (const l of lampsOf(room)) {
+    const duty = lampDuty(l);
+    if (duty > 0) sources.push([l.lux_at_full * duty, lampKelvin(l)]);
+  }
+  return sources;
+}
+
+// Показания датчика (docs/model.md): lux = D + Σ E_i, CCT — среднее, взвешенное по lux, инерция и шум
+function readSensor(room) {
+  const s = room.sensor;
+  if (s.fault) throw new Error("OSError: [Errno 121] Remote I/O error");  // как smbus2 при обрыве
+  const sources = lightSources(room);
+  const lux = sources.reduce((sum, [value]) => sum + value, 0);
+  const now = simNow();
+  if (s.measured == null) s.measured = lux;
+  else if (now > s.lastReadAt) s.measured += (lux - s.measured) * Math.min(1, (now - s.lastReadAt) / 1000 / SENSOR_INERTIA_S);
+  s.lastReadAt = now;
+  const noise = 1 + (Math.random() * 2 - 1) * SENSOR_NOISE;
+  const cct = lux < MIN_LUX_FOR_CCT ? null : Math.round(sources.reduce((sum, [value, k]) => sum + value * k, 0) / lux);
+  return { lux: s.measured * noise, cct };
 }
 
 function sensorLoop() {
@@ -517,13 +531,12 @@ function sensorLoop() {
     const s = r.sensor;
     if (!s) continue;
     try {
-      const v = readLux(s);
-      s.lux = s.status === "ok" && s.fails === 0 ? s.lux * .6 + v * .4 : v;   // сглаживание
-      if (s.status === "error") log(`Датчик «${r.name}» снова отвечает`, "ok");
-      s.status = "ok"; s.fails = 0;
+      Object.assign(s, readSensor(r));
+      if (s.status === "offline") log(`Датчик «${r.name}» снова отвечает`, "ok");
+      s.status = "online"; s.fails = 0;
     } catch (e) {
       s.fails++;
-      if (s.fails === 3) { s.status = "error"; log(`Датчик «${r.name}» не отвечает (3 ошибки подряд)`, "err"); }
+      if (s.fails === 3) { s.status = "offline"; log(`Датчик «${r.name}» не отвечает (3 ошибки подряд)`, "err"); }
     }
   }
   dirty = true;
@@ -534,7 +547,7 @@ function sensorLoop() {
 function autoLoop() {
   for (const r of ROOMS) {
     if (r.mode !== "auto") continue;
-    if (!r.sensor || r.sensor.status !== "ok") {
+    if (!r.sensor || r.sensor.status !== "online") {
       // Инвариант 8: датчик потерян — режим manual, уставка остаётся, свет не скачет
       r.mode = "manual";
       log(`Авто: «${r.name}» — датчик не отвечает, режим «Ручной»`, "err");
@@ -567,10 +580,7 @@ function circadianLoop() {
 // ---------- Энергия ----------
 const energy = { lastSim: simNow(), tariff: 6.0 };
 // Мощность считается от duty (гамма-коррекция), а не от воспринимаемой яркости (docs/model.md)
-const lampPower = l => {
-  const duty = l.kind === "onoff" ? l.duty.relay : Math.max(l.duty.warm + l.duty.cool, l.duty.pwm);
-  return l.max_power_w * duty;   // как в docs/model.md: реле разомкнуто → 0 Вт
-};
+const lampPower = l => l.max_power_w * lampDuty(l);   // как в docs/model.md: реле разомкнуто → 0 Вт
 
 function energyLoop() {
   const t = simNow();
@@ -594,16 +604,9 @@ const ui = { rooms: {}, lamps: {}, pins: {} };
 
 // Что светит лампа сейчас — по значениям на ножках, как увидел бы глаз
 function lampLook(l) {
-  const d = l.duty;
-  const rel = l.pins.relay != null ? d.relay : 1;
-  let lin, k;
-  if (l.kind === "cct") {
-    const sum = d.warm + d.cool;
-    lin = sum * rel;
-    k = sum > 1e-4 ? K_MIN + (d.cool / sum) * (K_MAX - K_MIN) : l.state.temp;
-  } else if (l.kind === "dimmable") { lin = d.pwm * rel; k = 2900; }
-  else { lin = rel; k = 4000; }
-  return { vis: Math.pow(clamp(lin, 0, 1), 1 / GAMMA), k };
+  const sum = l.duty.warm + l.duty.cool;
+  const k = sum > 1e-4 ? K_MIN + (l.duty.cool / sum) * (K_MAX - K_MIN) : l.state.temp;
+  return { vis: Math.pow(clamp(lampDuty(l), 0, 1), 1 / GAMMA), k };
 }
 
 function pinOwners() {
@@ -713,8 +716,6 @@ function buildCircStrip() {
 // ---------- Пульт комнаты ----------
 function buildPanel() {
   const r = selected, lamps = lampsOf(r);
-  const hasCct = lamps.some(l => l.kind === "cct");
-  const hasDim = lamps.some(l => l.kind !== "onoff");
   const s = r.sensor;
   panel.innerHTML = `
     <div class="panel-head">
@@ -728,26 +729,26 @@ function buildPanel() {
           <button data-act="room-on">Включить всё</button>
           <button data-act="room-off">Выключить всё</button>
         </div>
-        ${hasDim ? `<div class="row"><label>Яркость</label><input class="grow" type="range" min="0" max="100" data-act="room-bright"><span class="val" data-v="room-bright"></span></div>` : ""}
-        ${hasCct ? `<div class="row"><label>Оттенок</label><input class="grow temp-range" type="range" min="${K_MIN}" max="${K_MAX}" step="50" data-act="room-temp"><span class="val" data-v="room-temp"></span></div>` : ""}
+        <div class="row"><label>Яркость</label><input class="grow" type="range" min="0" max="100" data-act="room-bright"><span class="val" data-v="room-bright"></span></div>
+        <div class="row"><label>Оттенок</label><input class="grow temp-range" type="range" min="${K_MIN}" max="${K_MAX}" step="50" data-act="room-temp"><span class="val" data-v="room-temp"></span></div>
         <div class="row"><label>Режим яркости</label>
           <div class="seg" data-seg="room-mode">
             <button data-act="room-mode" data-mode="manual">Ручной</button>
             <button data-act="room-mode" data-mode="auto" ${s ? "" : 'disabled title="В комнате нет датчика"'}>Авто</button>
           </div>
         </div>
-        ${hasCct ? `<div class="row"><label>Режим оттенка</label>
+        <div class="row"><label>Режим оттенка</label>
           <div class="seg" data-seg="room-cmode">
             <button data-act="room-cmode" data-mode="manual">Ручной</button>
             <button data-act="room-cmode" data-mode="circadian">☀/☾ Циркадный</button>
-          </div></div>` : ""}
+          </div></div>
         ${s ? `<div class="row"><label>Цель авто</label><input class="grow" type="range" min="50" max="800" step="10" data-act="room-target"><span class="val" data-v="room-target"></span></div>` : ""}
       </div>
       <div class="box">
         <h3>Датчик освещённости</h3>
         ${s ? `
           <div class="row"><label>Сейчас</label><b class="val" style="text-align:left" data-v="lux"></b><span class="status" data-v="sstatus"></span></div>
-          <div class="note">${s.name} · ${s.bus}. Висит у окна и меряет дневной свет.</div>
+          <div class="note">${s.name} · ${s.bus}. Видит весь свет в комнате: дневной и от самих ламп.</div>
           <div class="row" style="margin-top:12px"><label>Свет за окном</label><input class="grow" type="range" min="0" max="1000" step="10" data-act="lux"><span class="val" data-v="lux-ovr"></span></div>
           <div class="row">
             <label></label>
@@ -765,7 +766,7 @@ function buildPanel() {
         <div class="lamp-row" data-lamp="${l.id}">
           <div class="lr-name">
             <span class="dot" data-v="dot"></span>
-            <div><b>${l.name}</b><br><small>${KIND_NAMES[l.kind]} · ${l.max_power_w} Вт</small></div>
+            <div><b>${l.name}</b><br><small>тёплый↔холодный · ${l.max_power_w} Вт</small></div>
           </div>
           <div class="lr-ctl"><span class="val" data-v="fact"></span></div>
           <div class="lr-modes">
@@ -802,17 +803,17 @@ function updatePanel() {
 
   const s = r.sensor;
   if (s) {
-    q('[data-v="lux"]').textContent = s.status === "ok" ? fmt(s.lux) + " лк" : "—";
+    q('[data-v="lux"]').textContent = s.status !== "online" ? "—" : fmt(s.lux) + " лк" + (s.cct != null ? ` · ${s.cct} K` : "");
     const st = q('[data-v="sstatus"]');
-    st.className = "status" + (s.status === "ok" ? "" : " err");
-    st.innerHTML = `<i></i>${s.status === "ok" ? "работает" : "не отвечает"}`;
-    setVal(q('[data-act="lux"]'), Math.round(s.override ?? s.lux));
+    st.className = "status" + (s.status === "online" ? "" : " err");
+    st.innerHTML = `<i></i>${s.status === "online" ? "онлайн" : "оффлайн"}`;
+    setVal(q('[data-act="lux"]'), Math.round(s.override ?? outdoorLux(simHours())));
     q('[data-v="lux-ovr"]').textContent = s.override != null ? s.override + " лк" : "авто";
     setChecked(q('[data-act="lux-auto"]'), s.override == null);
     q('[data-act="fault"]').classList.toggle("on", s.fault);
     q('[data-act="fault"]').textContent = s.fault ? "🔌 Починить провод" : "✂ Оборвать провод";
     q('[data-v="auto-note"]').innerHTML = r.mode !== "auto" ? "Комната в ручном режиме — авто-регулятор выключен."
-      : s.status !== "ok" ? `<span class="warn">Датчик не отвечает — комната переключится в ручной режим.</span>`
+      : s.status !== "online" ? `<span class="warn">Датчик не отвечает — комната переключится в ручной режим.</span>`
       : `Авто-режим: цель ${r.target_lux} лк, сейчас ${fmt(s.lux)} лк, уставка яркости ${r.brightness} %.`;
   }
 
@@ -822,7 +823,7 @@ function updatePanel() {
     const st = l.state;
     const fact = row.querySelector('[data-v="fact"]');
     if (fact) fact.textContent = st.brightness > 0
-      ? `${st.brightness} %${l.kind === "cct" ? " · " + st.temp + " K" : ""}`
+      ? `${st.brightness} % · ${st.temp} K`
       : "выключен";
   }
 }
@@ -891,7 +892,7 @@ function renderState() {
     const u = ui.rooms[r.id];
     u.head.textContent = `💡 ${on}/${lamps.length} · ${fmt(w, 1)} Вт`;
     const mode = `${MODE_NAMES[r.mode]} · ${r.brightness} %`;
-    const sens = !r.sensor ? "без датчика" : r.sensor.status === "ok" ? `☀ ${fmt(r.sensor.lux)} лк` : "⚠ датчик не отвечает";
+    const sens = !r.sensor ? "без датчика" : r.sensor.status === "online" ? `☀ ${fmt(r.sensor.lux)} лк` : "⚠ датчик не отвечает";
     u.foot.textContent = `${sens} · ${mode}`;
   }
 
@@ -919,12 +920,12 @@ panel.addEventListener("input", e => {
   if (act === "room-bright") setRoomBrightness(r, +el.value);
   else if (act === "room-temp") setRoomTemp(r, +el.value);
   else if (act === "room-target") { r.target_lux = +el.value; dirty = true; }
-  else if (act === "lux") { r.sensor.override = +el.value; r.sensor.lux = +el.value; dirty = true; }
+  else if (act === "lux") { r.sensor.override = +el.value; dirty = true; }
 });
 
 panel.addEventListener("change", e => {
   const el = e.target, act = el.dataset.act, r = selected;
-  if (act === "lux-auto") { r.sensor.override = el.checked ? null : Math.round(r.sensor.lux); dirty = true; }
+  if (act === "lux-auto") { r.sensor.override = el.checked ? null : Math.round(outdoorLux(simHours())); dirty = true; }
 });
 
 panel.addEventListener("click", e => {
@@ -967,12 +968,12 @@ buildPlan();
 buildBoard();
 buildCircStrip();
 buildPanel();
-for (const l of LAMPS) startTransition(l, targetDuty(l), 0);
+for (const r of ROOMS) applyRoom(r);
 runLoops();
-log("Симулятор запущен: 4 комнаты, 10 светильников, 3 датчика");
+log(`Симулятор запущен: ${ROOMS.length} комнаты, ${LAMPS.length} светильников, ${ROOMS.filter(r => r.sensor).length} датчика`);
 
-setInterval(sensorLoop, 2000);
-setInterval(autoLoop, 2000);
+setInterval(sensorLoop, 1000);
+setInterval(autoLoop, 1000);
 setInterval(circadianLoop, 500);
 setInterval(energyLoop, 1000);
 setInterval(() => { dirty = true; }, 1000);   // часы
