@@ -180,7 +180,7 @@ header h1 { font-size: 18px; }
   <section class="left">
     <div class="card">
       <div class="plan" id="plan"></div>
-      <div class="plan-hint">Нажмите на комнату, чтобы открыть её пульт. Нажатие на лампу включает/выключает её.</div>
+      <div class="plan-hint">Нажмите на комнату, чтобы открыть её пульт. Нажатие на лампу заставляет её мигнуть — так её проще найти.</div>
     </div>
     <div class="card" id="panel"></div>
   </section>
@@ -256,48 +256,41 @@ header h1 { font-size: 18px; }
 "use strict";
 
 // =====================================================================
-// Конфигурация «сборки» — то же, что будет лежать в server/hardware.yaml
+// Конфигурация «сборки» — то же, что лежит в device/device.yaml
 // =====================================================================
+// Комната — единица управления (docs/model.md): режим, уставка яркости и
+// уставка оттенка живут здесь, а не у лампы. Лампы получают уставку комнаты.
 const ROOMS = [
   { id: 1, name: "Гостиная", area: "living", target_lux: 300,
-    sensor: { name: "BH1750", bus: "I2C-1, адрес 0x23", window: 1.0 },
-    schedule: { on: "18:00", off: "23:30", brightness: 80 } },
+    sensor: { name: "TCS34725", bus: "I2C-1, адрес 0x29", window: 1.0 } },
   { id: 2, name: "Кухня", area: "kitchen", target_lux: 400,
-    sensor: { name: "BH1750", bus: "I2C-1 → мультиплексор TCA9548A (0x70), канал 1, адрес 0x23", window: 0.8 },
-    schedule: { on: "07:00", off: "09:00", brightness: 100 } },
+    sensor: { name: "TCS34725", bus: "I2C-1 → мультиплексор TCA9548A (0x70), канал 1, адрес 0x29", window: 0.8 } },
   { id: 3, name: "Спальня", area: "bedroom", target_lux: 200,
-    sensor: { name: "BH1750", bus: "I2C-1, адрес 0x5C", window: 0.6 },
-    schedule: { on: "21:00", off: "23:00", brightness: 40 } },
-  { id: 4, name: "Прихожая", area: "hall", target_lux: 150, sensor: null,
-    schedule: { on: "18:30", off: "00:30", brightness: 100 } },
+    sensor: { name: "TCS34725", bus: "I2C-1 → мультиплексор TCA9548A (0x70), канал 2, адрес 0x29", window: 0.6 } },
+  { id: 4, name: "Прихожая", area: "hall", target_lux: 150, sensor: null },
 ];
 
 // kind: cct — реле + тёплый + холодный; dimmable — (реле) + один ШИМ; onoff — только реле
 const LAMPS = [
-  { id: 1,  room: 1, name: "Люстра",        kind: "cct",      pins: { relay: 5,  warm: 17, cool: 27 }, rated_w: 24, pos: [50, 42] },
-  { id: 2,  room: 1, name: "Торшер",        kind: "cct",      pins: { relay: 22, warm: 18, cool: 25 }, rated_w: 10, pos: [15, 74] },
-  { id: 3,  room: 1, name: "Подсветка ТВ",  kind: "dimmable", pins: { relay: 4,  pwm: 12 },            rated_w: 6,  pos: [84, 78] },
-  { id: 4,  room: 1, name: "Бра",           kind: "dimmable", pins: { pwm: 8 },                        rated_w: 4,  pos: [84, 30] },
-  { id: 5,  room: 2, name: "Основной свет", kind: "cct",      pins: { relay: 16, warm: 20, cool: 21 }, rated_w: 18, pos: [50, 38] },
-  { id: 6,  room: 2, name: "Над столом",    kind: "cct",      pins: { relay: 26, warm: 19, cool: 10 }, rated_w: 12, pos: [30, 74] },
-  { id: 7,  room: 2, name: "Рабочая зона",  kind: "dimmable", pins: { pwm: 9 },                        rated_w: 5,  pos: [80, 74] },
-  { id: 8,  room: 3, name: "Потолок",       kind: "cct",      pins: { relay: 6,  warm: 23, cool: 24 }, rated_w: 15, pos: [45, 45] },
-  { id: 9,  room: 3, name: "Ночник",        kind: "dimmable", pins: { pwm: 13 },                       rated_w: 3,  pos: [82, 74] },
-  { id: 10, room: 4, name: "Светильник",    kind: "onoff",    pins: { relay: 11 },                     rated_w: 8,  pos: [50, 55] },
+  { id: 1,  room: 1, name: "Люстра",        kind: "cct",      pins: { relay: 5,  warm: 17, cool: 27 }, max_power_w: 24, pos: [50, 42] },
+  { id: 2,  room: 1, name: "Торшер",        kind: "cct",      pins: { relay: 22, warm: 18, cool: 25 }, max_power_w: 10, pos: [15, 74] },
+  { id: 3,  room: 1, name: "Подсветка ТВ",  kind: "dimmable", pins: { relay: 4,  pwm: 12 },            max_power_w: 6,  pos: [84, 78] },
+  { id: 4,  room: 1, name: "Бра",           kind: "dimmable", pins: { pwm: 8 },                        max_power_w: 4,  pos: [84, 30] },
+  { id: 5,  room: 2, name: "Основной свет", kind: "cct",      pins: { relay: 16, warm: 20, cool: 21 }, max_power_w: 18, pos: [50, 38] },
+  { id: 6,  room: 2, name: "Над столом",    kind: "cct",      pins: { relay: 26, warm: 19, cool: 10 }, max_power_w: 12, pos: [30, 74] },
+  { id: 7,  room: 2, name: "Рабочая зона",  kind: "dimmable", pins: { pwm: 9 },                        max_power_w: 5,  pos: [80, 74] },
+  { id: 8,  room: 3, name: "Потолок",       kind: "cct",      pins: { relay: 6,  warm: 23, cool: 24 }, max_power_w: 15, pos: [45, 45] },
+  { id: 9,  room: 3, name: "Ночник",        kind: "dimmable", pins: { pwm: 13 },                       max_power_w: 3,  pos: [82, 74] },
+  { id: 10, room: 4, name: "Светильник",    kind: "onoff",    pins: { relay: 11 },                     max_power_w: 8,  pos: [50, 55] },
 ];
 
-// Начальное состояние, чтобы картинка сразу была «живой»
-const INITIAL = {
-  1: { is_on: true,  brightness: 70, temp: 3000, mode: "manual",   color_mode: "circadian" },
-  2: { is_on: true,  brightness: 40, temp: 2700, mode: "manual",   color_mode: "manual" },
-  3: { is_on: false, brightness: 50, mode: "manual" },
-  4: { is_on: false, brightness: 60, mode: "manual" },
-  5: { is_on: false, brightness: 0,  temp: 4500, mode: "auto",     color_mode: "circadian" },
-  6: { is_on: false, brightness: 0,  temp: 4000, mode: "auto",     color_mode: "circadian" },
-  7: { is_on: false, brightness: 0,  mode: "auto" },
-  8: { is_on: false, brightness: 40, temp: 2700, mode: "schedule", color_mode: "circadian" },
-  9: { is_on: false, brightness: 20, mode: "manual" },
-  10: { is_on: false, brightness: 100, mode: "manual" },
+// Начальное состояние комнат, чтобы картинка сразу была «живой».
+// У лампы хранится только фактическая яркость и оттенок — они догоняют уставку комнаты.
+const INITIAL_ROOMS = {
+  1: { mode: "manual", brightness: 70, last_brightness: 70, color_mode: "circadian", color_temp_k: 3000 },
+  2: { mode: "manual", brightness: 40, last_brightness: 40, color_mode: "manual",   color_temp_k: 2700 },
+  3: { mode: "manual", brightness: 40, last_brightness: 40, color_mode: "circadian", color_temp_k: 2700 },
+  4: { mode: "manual", brightness: 0,  last_brightness: 100, color_mode: "manual",  color_temp_k: 4000 },
 };
 
 // Схема 40-контактной гребёнки: [физический номер, тип, BCM]
@@ -313,11 +306,11 @@ const ALLOWED_PINS = Array.from({ length: 24 }, (_, i) => i + 4); // BCM 4–27;
 
 const K_MIN = 2700, K_MAX = 6500;
 const GAMMA = 2.2;
-const STANDBY_W = 0.3;
 const CURVE = [[0, 2700], [6, 2700], [9, 5000], [13, 6000], [17, 5000], [20, 3500], [22, 2700], [24, 2700]];
 const ROLE_NAMES = { relay: "реле", warm: "тёплый", cool: "холодный", pwm: "ШИМ" };
 const KIND_NAMES = { cct: "тёплый↔холодный", dimmable: "с регулировкой", onoff: "вкл/выкл" };
-const MODE_NAMES = { manual: "Ручной", auto: "Авто", schedule: "Расписание" };
+const MODE_NAMES = { manual: "Ручной", auto: "Авто" };
+const CMODE_NAMES = { manual: "Ручной", circadian: "Циркадный" };
 
 // =====================================================================
 // Утилиты
@@ -353,12 +346,6 @@ function curveK(h) {
   return CURVE[CURVE.length - 1][1];
 }
 
-const parseHM = s => { const [h, m] = s.split(":").map(Number); return h + m / 60; };
-function inInterval(h, on, off) {
-  const a = parseHM(on), b = parseHM(off);
-  return a <= b ? h >= a && h < b : h >= a || h < b;   // интервал через полночь
-}
-
 // =====================================================================
 // Часы «устройства» — их можно перематывать и ускорять
 // =====================================================================
@@ -386,24 +373,22 @@ function log(text, kind = "") {
   dirty = true;
 }
 
-// Состояние ламп и «ножек»
+// Состояние комнат: уставки и режимы. У лампы — только фактическая яркость и оттенок.
+for (const r of ROOMS) {
+  Object.assign(r, { wh: 0 }, INITIAL_ROOMS[r.id]);
+  if (r.sensor) Object.assign(r.sensor, { lux: 0, status: "ok", fails: 0, override: null, fault: false });
+}
 for (const l of LAMPS) {
-  l.min_k = K_MIN; l.max_k = K_MAX;
-  l.state = { temp: 4000, color_mode: "manual", ...INITIAL[l.id] };
+  l.state = { brightness: 0, temp: 4000 };   // фактическое: догоняет уставку комнаты
   l.duty = { relay: 0, warm: 0, cool: 0, pwm: 0 };
   l.tr = null;
   l.wh = 0;
-}
-for (const r of ROOMS) {
-  r.autoOn = null;
-  r.wh = 0;
-  if (r.sensor) Object.assign(r.sensor, { lux: 0, status: "ok", fails: 0, override: null, fault: false });
 }
 
 // Яркость + температура → duty на ножках (с гамма-коррекцией)
 function targetDuty(l) {
   const s = l.state, d = { relay: 0, warm: 0, cool: 0, pwm: 0 };
-  if (!s.is_on) return d;
+  if (s.brightness <= 0) return d;   // яркость 0 = выключено, отдельного флага нет
   d.relay = 1;
   const b = l.kind === "onoff" ? 1 : Math.pow(s.brightness / 100, GAMMA);
   if (l.kind === "cct") {
@@ -434,39 +419,70 @@ function stepTransitions(now) {
   }
 }
 
-// Единая точка изменения лампы (LightingService.apply)
-function apply(l, changes, source = "user") {
+// Единая точка изменения лампы: сюда приходят уставки комнаты и ручные действия.
+// Режимы и уставки живут у комнаты, поэтому лампа просто принимает новую яркость и оттенок.
+function apply(l, changes) {
   const ch = { ...changes };
-  const s = l.state, before = { ...s };
-  if (l.kind !== "cct") { delete ch.temp; delete ch.color_mode; }
+  const s = l.state;
+  if (l.kind !== "cct") delete ch.temp;
   if (l.kind === "onoff") delete ch.brightness;
   if ("brightness" in ch) ch.brightness = clamp(Math.round(ch.brightness), 0, 100);
-  if ("temp" in ch) ch.temp = clamp(Math.round(ch.temp), l.min_k, l.max_k);
-  if (source === "user") {
-    if ("brightness" in ch && !("is_on" in ch) && ch.brightness > 0) ch.is_on = true;
-    if (("is_on" in ch || "brightness" in ch) && !("mode" in ch)) ch.mode = "manual";
-    if ("temp" in ch && !("color_mode" in ch)) ch.color_mode = "manual";
-  }
+  if ("temp" in ch) ch.temp = clamp(Math.round(ch.temp), K_MIN, K_MAX);
   Object.assign(s, ch);
-  if (s.is_on !== before.is_on || s.brightness !== before.brightness || s.temp !== before.temp) {
-    clearTimeout(l.idTimer);
-    startTransition(l);
+  clearTimeout(l.idTimer);
+  startTransition(l);
+  dirty = true;
+}
+
+// Уставка комнаты → все её лампы (инвариант 4: лампы получают уставку комнаты)
+function applyRoom(room) {
+  for (const l of lampsOf(room)) {
+    const ch = { brightness: room.brightness };
+    if (l.kind === "cct") ch.temp = room.color_temp_k;
+    apply(l, ch);
   }
-  if (source === "user" && before.mode !== "manual" && s.mode === "manual" && !("mode" in changes))
-    log(`${l.name}: ручное управление — режим «Ручной»`);
+}
+
+// Ручное действие пользователя с яркостью переводит комнату в manual (инвариант 9)
+function setRoomBrightness(room, value) {
+  room.brightness = clamp(Math.round(value), 0, 100);
+  if (room.brightness > 0) room.last_brightness = room.brightness;
+  if (room.mode !== "manual") {
+    room.mode = "manual";
+    log(`${room.name}: ручное управление — режим яркости «Ручной»`);
+  }
+  applyRoom(room);
+}
+
+// Ручное изменение оттенка переводит в manual режим оттенка (инвариант 9)
+function setRoomTemp(room, value) {
+  room.color_temp_k = clamp(Math.round(value), K_MIN, K_MAX);
+  if (room.color_mode !== "manual") {
+    room.color_mode = "manual";
+    log(`${room.name}: ручное управление — оттенок «Ручной»`);
+  }
+  applyRoom(room);
+}
+
+// «Включить» = вернуть последнюю ненулевую уставку, «выключить» = уставка 0 (инвариант 6)
+function setRoomPower(room, on) {
+  setRoomBrightness(room, on ? (room.last_brightness || 100) : 0);
+}
+
+function setRoomMode(room, mode) {
+  if (mode === "auto" && (!room.sensor || room.sensor.status !== "ok")) {
+    log(`${room.name}: авто-режим недоступен — нет датчика онлайн`, "err");
+    return;
+  }
+  room.mode = mode;
+  log(`${room.name}: режим яркости «${MODE_NAMES[mode]}»`);
   dirty = true;
 }
 
-function setMode(l, mode) {
-  const room = roomById(l.room);
-  if (mode === "auto" && !room.sensor) { log(`${l.name}: в комнате «${room.name}» нет датчика — авто-режим недоступен`, "err"); return; }
-  if (mode === "auto" && l.kind === "onoff") { /* вкл/выкл по датчику без яркости — допустимо */ }
-  l.state.mode = mode;
+function setRoomColorMode(room, mode) {
+  room.color_mode = mode;
+  log(`${room.name}: оттенок — ${CMODE_NAMES[mode]}`);
   dirty = true;
-}
-
-function roomCommand(room, ch) {
-  for (const l of lampsOf(room)) apply(l, ch, "user");
 }
 
 function identify(l) {
@@ -514,60 +530,47 @@ function sensorLoop() {
 }
 
 // ---------- Авто-режим ----------
+// Регулятор из docs/model.md: маленькие шаги раз в секунду, мёртвая зона 10 %.
 function autoLoop() {
   for (const r of ROOMS) {
-    const lamps = lampsOf(r).filter(l => l.state.mode === "auto");
-    if (!lamps.length || !r.sensor || r.sensor.status !== "ok") continue;   // при сбое держим яркость
-    const amb = r.sensor.lux, tgt = r.target_lux;
-    const prev = r.autoOn;
-    if (amb > tgt * 1.1) r.autoOn = false;
-    else if (amb < tgt * .9) r.autoOn = true;
-    else if (r.autoOn === null) r.autoOn = amb < tgt;
-    if (prev !== null && prev !== r.autoOn)
-      log(`Авто: «${r.name}» — ${r.autoOn ? "темно, включаем" : "светло, гасим"} (${fmt(amb)} лк)`, "auto");
-    const need = r.autoOn ? Math.max(5, clamp((tgt - amb) / tgt, 0, 1) * 100) : 0;
-    for (const l of lamps) {
-      if (l.kind === "onoff") { if (l.state.is_on !== r.autoOn) apply(l, { is_on: r.autoOn }, "auto"); continue; }
-      const cur = l.state.is_on ? l.state.brightness : 0;
-      const nb = cur + clamp(need - cur, -10, 10);   // не больше 10% за шаг
-      if (nb <= 0) { if (l.state.is_on) apply(l, { is_on: false }, "auto"); }
-      else if (nb !== cur || !l.state.is_on) apply(l, { is_on: true, brightness: nb }, "auto");
+    if (r.mode !== "auto") continue;
+    if (!r.sensor || r.sensor.status !== "ok") {
+      // Инвариант 8: датчик потерян — режим manual, уставка остаётся, свет не скачет
+      r.mode = "manual";
+      log(`Авто: «${r.name}» — датчик не отвечает, режим «Ручной»`, "err");
+      continue;
     }
-  }
-}
-
-// ---------- Расписание ----------
-function scheduleLoop() {
-  const h = simHours();
-  for (const r of ROOMS) {
-    const sc = r.schedule;
-    const active = inInterval(h, sc.on, sc.off);
-    for (const l of lampsOf(r)) {
-      if (l.state.mode !== "schedule") continue;
-      const ch = { is_on: active };
-      if (active && l.kind !== "onoff") ch.brightness = sc.brightness;
-      if (l.state.is_on !== active || (active && ch.brightness != null && l.state.brightness !== ch.brightness)) {
-        apply(l, ch, "schedule");
-        log(`Расписание: ${l.name} (${r.name}) — ${active ? "включено" : "выключено"}`, "auto");
-      }
-    }
+    const lux = r.sensor.lux, tgt = r.target_lux;
+    const error = tgt - lux;
+    if (Math.abs(error) <= tgt * 0.1) continue;   // мёртвая зона
+    const step = clamp(0.5 * error / tgt * 100, -10, 10);
+    const next = clamp(r.brightness + step, 0, 100);
+    if (Math.round(next) === Math.round(r.brightness)) continue;
+    r.brightness = next;
+    if (next > 0) r.last_brightness = next;
+    applyRoom(r);
   }
 }
 
 // ---------- Циркадный режим ----------
+// Оттенок комнаты по времени суток; работает и при выключенном свете (инвариант: свет загорится тёплым)
 function circadianLoop() {
-  const k = curveK(simHours());
-  for (const l of LAMPS) {
-    if (l.kind !== "cct" || l.state.color_mode !== "circadian") continue;
-    const target = clamp(k, l.min_k, l.max_k);
-    if (Math.abs(target - l.state.temp) >= 15) apply(l, { temp: target }, "circadian");
+  const k = clamp(curveK(simHours()), K_MIN, K_MAX);
+  for (const r of ROOMS) {
+    if (r.color_mode !== "circadian") continue;
+    if (Math.abs(k - r.color_temp_k) < 15) continue;
+    r.color_temp_k = Math.round(k);
+    applyRoom(r);
   }
 }
 
 // ---------- Энергия ----------
 const energy = { lastSim: simNow(), tariff: 6.0 };
-const lampPower = l => !l.state.is_on ? (l.kind === "onoff" ? 0 : STANDBY_W)
-  : l.kind === "onoff" ? l.rated_w : l.rated_w * l.state.brightness / 100;
+// Мощность считается от duty (гамма-коррекция), а не от воспринимаемой яркости (docs/model.md)
+const lampPower = l => {
+  const duty = l.kind === "onoff" ? l.duty.relay : Math.max(l.duty.warm + l.duty.cool, l.duty.pwm);
+  return l.max_power_w * duty;   // как в docs/model.md: реле разомкнуто → 0 Вт
+};
 
 function energyLoop() {
   const t = simNow();
@@ -628,16 +631,16 @@ function buildPlan() {
     for (const l of lampsOf(r)) {
       const pool = document.createElement("div");
       pool.className = "pool";
-      const size = 90 + l.rated_w * 9;
+      const size = 90 + l.max_power_w * 9;
       Object.assign(pool.style, { left: l.pos[0] + "%", top: l.pos[1] + "%", width: size + "px", height: size + "px" });
       const lamp = document.createElement("div");
       lamp.className = "lamp";
       Object.assign(lamp.style, { left: l.pos[0] + "%", top: l.pos[1] + "%" });
-      lamp.innerHTML = `<div class="bulb" title="${l.name}: вкл/выкл"></div><span class="lamp-label">${l.name}</span>`;
+      lamp.innerHTML = `<div class="bulb" title="${l.name}: мигнуть"></div><span class="lamp-label">${l.name}</span>`;
       lamp.querySelector(".bulb").addEventListener("click", e => {
         e.stopPropagation();
         selected = r; buildPanel();
-        apply(l, { is_on: !l.state.is_on });
+        identify(l);   // лампа не единица управления: клик только помогает найти её
       });
       el.append(pool, lamp);
       ui.lamps[l.id] = { pool, bulb: lamp.querySelector(".bulb") };
@@ -731,9 +734,7 @@ function buildPanel() {
           <div class="seg" data-seg="room-mode">
             <button data-act="room-mode" data-mode="manual">Ручной</button>
             <button data-act="room-mode" data-mode="auto" ${s ? "" : 'disabled title="В комнате нет датчика"'}>Авто</button>
-            <button data-act="room-mode" data-mode="schedule">Расписание</button>
           </div>
-          <span class="warn" data-v="room-mixed"></span>
         </div>
         ${hasCct ? `<div class="row"><label>Режим оттенка</label>
           <div class="seg" data-seg="room-cmode">
@@ -741,11 +742,6 @@ function buildPanel() {
             <button data-act="room-cmode" data-mode="circadian">☀/☾ Циркадный</button>
           </div></div>` : ""}
         ${s ? `<div class="row"><label>Цель авто</label><input class="grow" type="range" min="50" max="800" step="10" data-act="room-target"><span class="val" data-v="room-target"></span></div>` : ""}
-        <div class="row"><label>Расписание</label>
-          с <input type="time" data-act="sch-on" value="${r.schedule.on}">
-          до <input type="time" data-act="sch-off" value="${r.schedule.off}">
-          ${hasDim ? `<input type="number" min="1" max="100" style="width:64px" data-act="sch-bright" value="${r.schedule.brightness}"> %` : ""}
-        </div>
       </div>
       <div class="box">
         <h3>Датчик освещённости</h3>
@@ -769,22 +765,10 @@ function buildPanel() {
         <div class="lamp-row" data-lamp="${l.id}">
           <div class="lr-name">
             <span class="dot" data-v="dot"></span>
-            <label class="switch"><input type="checkbox" data-act="on"><span></span></label>
-            <div><b>${l.name}</b><br><small>${KIND_NAMES[l.kind]} · ${l.rated_w} Вт</small></div>
+            <div><b>${l.name}</b><br><small>${KIND_NAMES[l.kind]} · ${l.max_power_w} Вт</small></div>
           </div>
-          <div class="lr-ctl">${l.kind !== "onoff"
-            ? `<input type="range" min="0" max="100" data-act="bright"><span class="val" data-v="bright"></span>`
-            : `<span>только вкл/выкл</span>`}</div>
-          <div class="lr-ctl">${l.kind === "cct"
-            ? `<input class="temp-range" type="range" min="${l.min_k}" max="${l.max_k}" step="50" data-act="temp"><span class="val" data-v="temp"></span>`
-            : `<span>оттенок фиксированный</span>`}</div>
+          <div class="lr-ctl"><span class="val" data-v="fact"></span></div>
           <div class="lr-modes">
-            <select data-act="mode">
-              <option value="manual">Ручной</option>
-              <option value="auto" ${s ? "" : "disabled"}>Авто</option>
-              <option value="schedule">Расписание</option>
-            </select>
-            ${l.kind === "cct" ? `<select data-act="cmode"><option value="manual">Оттенок: ручной</option><option value="circadian">Оттенок: циркадный</option></select>` : ""}
             <button data-act="identify">Мигнуть</button>
           </div>
           <div class="pins" data-v="pins"></div>
@@ -803,21 +787,15 @@ function setChecked(el, v) { if (el) el.checked = v; }
 
 function updatePanel() {
   const r = selected, lamps = lampsOf(r), q = s => panel.querySelector(s);
-  const on = lamps.filter(l => l.state.is_on);
-  const dim = lamps.filter(l => l.kind !== "onoff");
-  const cct = lamps.filter(l => l.kind === "cct");
-  const avgB = dim.length ? Math.round(dim.reduce((a, l) => a + (l.state.is_on ? l.state.brightness : 0), 0) / dim.length) : 0;
-  const avgK = cct.length ? Math.round(cct.reduce((a, l) => a + l.state.temp, 0) / cct.length / 50) * 50 : 0;
-  setVal(q('[data-act="room-bright"]'), avgB);
-  if (q('[data-v="room-bright"]')) q('[data-v="room-bright"]').textContent = avgB + " %";
-  setVal(q('[data-act="room-temp"]'), avgK);
-  if (q('[data-v="room-temp"]')) q('[data-v="room-temp"]').textContent = avgK + " K";
+  // Ползунки комнаты показывают уставки, а лампа во время плавного перехода
+  // ещё догоняет их — поэтому у каждой лампы ниже выводятся фактические значения.
+  setVal(q('[data-act="room-bright"]'), r.brightness);
+  if (q('[data-v="room-bright"]')) q('[data-v="room-bright"]').textContent = r.brightness + " %";
+  setVal(q('[data-act="room-temp"]'), r.color_temp_k);
+  if (q('[data-v="room-temp"]')) q('[data-v="room-temp"]').textContent = r.color_temp_k + " K";
 
-  const modes = new Set(lamps.map(l => l.state.mode));
-  panel.querySelectorAll('[data-seg="room-mode"] button').forEach(b => b.classList.toggle("on", modes.size === 1 && modes.has(b.dataset.mode)));
-  q('[data-v="room-mixed"]').textContent = modes.size > 1 ? "у ламп разные режимы" : "";
-  const cmodes = new Set(cct.map(l => l.state.color_mode));
-  panel.querySelectorAll('[data-seg="room-cmode"] button').forEach(b => b.classList.toggle("on", cmodes.size === 1 && cmodes.has(b.dataset.mode)));
+  panel.querySelectorAll('[data-seg="room-mode"] button').forEach(b => b.classList.toggle("on", b.dataset.mode === r.mode));
+  panel.querySelectorAll('[data-seg="room-cmode"] button').forEach(b => b.classList.toggle("on", b.dataset.mode === r.color_mode));
 
   setVal(q('[data-act="room-target"]'), r.target_lux);
   if (q('[data-v="room-target"]')) q('[data-v="room-target"]').textContent = r.target_lux + " лк";
@@ -833,23 +811,19 @@ function updatePanel() {
     setChecked(q('[data-act="lux-auto"]'), s.override == null);
     q('[data-act="fault"]').classList.toggle("on", s.fault);
     q('[data-act="fault"]').textContent = s.fault ? "🔌 Починить провод" : "✂ Оборвать провод";
-    const autoLamps = lamps.filter(l => l.state.mode === "auto").length;
-    q('[data-v="auto-note"]').innerHTML = !autoLamps ? "Ни одна лампа комнаты не в авто-режиме."
-      : s.status !== "ok" ? `<span class="warn">Датчик не отвечает — авто-лампы держат последнюю яркость.</span>`
-      : `Авто-режим: цель ${r.target_lux} лк, за окном ${fmt(s.lux)} лк → ${r.autoOn ? "свет нужен" : "достаточно светло"}.`;
+    q('[data-v="auto-note"]').innerHTML = r.mode !== "auto" ? "Комната в ручном режиме — авто-регулятор выключен."
+      : s.status !== "ok" ? `<span class="warn">Датчик не отвечает — комната переключится в ручной режим.</span>`
+      : `Авто-режим: цель ${r.target_lux} лк, сейчас ${fmt(s.lux)} лк, уставка яркости ${r.brightness} %.`;
   }
 
   for (const l of lamps) {
     const row = q(`.lamp-row[data-lamp="${l.id}"]`);
     if (!row) continue;
-    const st = l.state, rq = s => row.querySelector(s);
-    setChecked(rq('[data-act="on"]'), st.is_on);
-    setVal(rq('[data-act="bright"]'), st.brightness);
-    if (rq('[data-v="bright"]')) rq('[data-v="bright"]').textContent = st.brightness + " %";
-    setVal(rq('[data-act="temp"]'), st.temp);
-    if (rq('[data-v="temp"]')) rq('[data-v="temp"]').textContent = st.temp + " K";
-    setVal(rq('[data-act="mode"]'), st.mode);
-    setVal(rq('[data-act="cmode"]'), st.color_mode);
+    const st = l.state;
+    const fact = row.querySelector('[data-v="fact"]');
+    if (fact) fact.textContent = st.brightness > 0
+      ? `${st.brightness} %${l.kind === "cct" ? " · " + st.temp + " K" : ""}`
+      : "выключен";
   }
 }
 
@@ -912,13 +886,13 @@ function renderState() {
   $("#fadeVal").textContent = fadeMs + " мс";
 
   for (const r of ROOMS) {
-    const lamps = lampsOf(r), on = lamps.filter(l => l.state.is_on).length;
+    const lamps = lampsOf(r), on = lamps.filter(l => l.state.brightness > 0).length;
     const w = lamps.reduce((a, l) => a + lampPower(l), 0);
     const u = ui.rooms[r.id];
     u.head.textContent = `💡 ${on}/${lamps.length} · ${fmt(w, 1)} Вт`;
-    const modes = [...new Set(lamps.map(l => MODE_NAMES[l.state.mode]))].join(", ");
+    const mode = `${MODE_NAMES[r.mode]} · ${r.brightness} %`;
     const sens = !r.sensor ? "без датчика" : r.sensor.status === "ok" ? `☀ ${fmt(r.sensor.lux)} лк` : "⚠ датчик не отвечает";
-    u.foot.textContent = `${sens} · ${modes}`;
+    u.foot.textContent = `${sens} · ${mode}`;
   }
 
   const totalW = LAMPS.reduce((a, l) => a + lampPower(l), 0);
@@ -942,25 +916,15 @@ function renderState() {
 // =====================================================================
 panel.addEventListener("input", e => {
   const el = e.target, act = el.dataset.act, r = selected;
-  const row = el.closest(".lamp-row"), l = row && LAMPS.find(x => x.id === +row.dataset.lamp);
-  if (act === "room-bright") roomCommand(r, { brightness: +el.value });
-  else if (act === "room-temp") roomCommand(r, { temp: +el.value });
+  if (act === "room-bright") setRoomBrightness(r, +el.value);
+  else if (act === "room-temp") setRoomTemp(r, +el.value);
   else if (act === "room-target") { r.target_lux = +el.value; dirty = true; }
   else if (act === "lux") { r.sensor.override = +el.value; r.sensor.lux = +el.value; dirty = true; }
-  else if (act === "bright") apply(l, { brightness: +el.value });
-  else if (act === "temp") apply(l, { temp: +el.value });
 });
 
 panel.addEventListener("change", e => {
   const el = e.target, act = el.dataset.act, r = selected;
-  const row = el.closest(".lamp-row"), l = row && LAMPS.find(x => x.id === +row.dataset.lamp);
-  if (act === "on") apply(l, { is_on: el.checked });
-  else if (act === "mode") { setMode(l, el.value); runLoops(); }
-  else if (act === "cmode") { l.state.color_mode = el.value; runLoops(); }
-  else if (act === "lux-auto") { r.sensor.override = el.checked ? null : Math.round(r.sensor.lux); dirty = true; }
-  else if (act === "sch-on" && el.value) { r.schedule.on = el.value; runLoops(); }
-  else if (act === "sch-off" && el.value) { r.schedule.off = el.value; runLoops(); }
-  else if (act === "sch-bright") { r.schedule.brightness = clamp(+el.value || 1, 1, 100); runLoops(); }
+  if (act === "lux-auto") { r.sensor.override = el.checked ? null : Math.round(r.sensor.lux); dirty = true; }
 });
 
 panel.addEventListener("click", e => {
@@ -968,14 +932,10 @@ panel.addEventListener("click", e => {
   if (!el) return;
   const act = el.dataset.act, r = selected;
   const row = el.closest(".lamp-row"), l = row && LAMPS.find(x => x.id === +row.dataset.lamp);
-  if (act === "room-on") roomCommand(r, { is_on: true });
-  else if (act === "room-off") roomCommand(r, { is_on: false });
-  else if (act === "room-mode") { for (const x of lampsOf(r)) setMode(x, el.dataset.mode); log(`${r.name}: режим яркости «${MODE_NAMES[el.dataset.mode]}»`); runLoops(); }
-  else if (act === "room-cmode") {
-    for (const x of lampsOf(r)) if (x.kind === "cct") x.state.color_mode = el.dataset.mode;
-    log(`${r.name}: оттенок — ${el.dataset.mode === "circadian" ? "циркадный" : "ручной"}`);
-    runLoops();
-  }
+  if (act === "room-on") setRoomPower(r, true);
+  else if (act === "room-off") setRoomPower(r, false);
+  else if (act === "room-mode") setRoomMode(r, el.dataset.mode);
+  else if (act === "room-cmode") setRoomColorMode(r, el.dataset.mode);
   else if (act === "fault") { r.sensor.fault = !r.sensor.fault; log(`Симуляция: ${r.sensor.fault ? "оборван" : "починен"} провод датчика «${r.name}»`); dirty = true; }
   else if (act === "identify") identify(l);
 });
@@ -1001,7 +961,7 @@ tariff.addEventListener("input", () => { energy.tariff = Math.max(0, +tariff.val
 // =====================================================================
 // Запуск
 // =====================================================================
-function runLoops() { sensorLoop(); autoLoop(); scheduleLoop(); circadianLoop(); dirty = true; }
+function runLoops() { sensorLoop(); autoLoop(); circadianLoop(); dirty = true; }
 
 buildPlan();
 buildBoard();
@@ -1013,7 +973,6 @@ log("Симулятор запущен: 4 комнаты, 10 светильни�
 
 setInterval(sensorLoop, 2000);
 setInterval(autoLoop, 2000);
-setInterval(scheduleLoop, 1000);
 setInterval(circadianLoop, 500);
 setInterval(energyLoop, 1000);
 setInterval(() => { dirty = true; }, 1000);   // часы
