@@ -37,3 +37,23 @@ def test_kelvin_follows_channel_ratio() -> None:
 
     lamp.set_output(relay=True, warm=0.5, cool=0.5)
     assert lamp.kelvin == 4600
+
+
+def test_lux_follows_duty_and_lamp_brightness() -> None:
+    lamp = VirtualLight(max_power_w=10, lux_at_full=200)
+
+    assert lamp.lux == 0
+
+    lamp.set_output(relay=True, warm=0.25, cool=0.25)
+    assert lamp.lux == 100
+
+
+def test_close_turns_lamp_off_and_can_repeat() -> None:
+    lamp = VirtualLight(max_power_w=10)
+    lamp.set_output(relay=True, warm=1.0, cool=0.0)
+
+    lamp.close()
+    lamp.close()
+
+    assert lamp.duty == 0
+    assert lamp.power_w == 0

@@ -6,78 +6,69 @@
 #
 # Нумерация ножек — BCM (GPIO17 = физический контакт 11).
 # Ножки 2 и 3 заняты шиной I2C, их для ламп не используем.
+# Здесь заняты все 24 свободные ножки (BCM 4–27), поэтому ламп ровно 8.
+# Ножки 14 и 15 (UART) и 7–11 (SPI) на Pi должны быть свободны: эти интерфейсы выключаем в настройках.
 
 site:
   name: "Квартира"
   tariff_rub_per_kwh: 6.0
 
-# kind:
-#   cct      — CCT-лента: реле + тёплый канал + холодный канал (3 ножки)
-#   dimmable — один ШИМ-канал, оттенок фиксированный (1 ножка, реле необязательно)
-#   onoff    — только реле, яркость не регулируется (1 ножка)
+# Все лампы — CCT-ленты: реле + тёплый канал + холодный канал (3 ножки).
+# lux_at_full — сколько lux лампа даёт на 100 % (используется только в sim).
 lamps:
   - id: 1
     name: "Люстра"
-    kind: cct
     pins: { relay: 5, warm: 17, cool: 27 }
     max_power_w: 24
+    lux_at_full: 400
   - id: 2
     name: "Торшер"
-    kind: cct
     pins: { relay: 22, warm: 18, cool: 25 }
     max_power_w: 10
+    lux_at_full: 160
   - id: 3
-    name: "Подсветка ТВ"
-    kind: dimmable
-    pins: { relay: 4, pwm: 12 }
-    max_power_w: 6
-  - id: 4
     name: "Бра"
-    kind: dimmable
-    pins: { pwm: 8 }
+    pins: { relay: 4, warm: 12, cool: 8 }
     max_power_w: 4
-  - id: 5
+    lux_at_full: 60
+  - id: 4
     name: "Основной свет"
-    kind: cct
     pins: { relay: 16, warm: 20, cool: 21 }
     max_power_w: 18
-  - id: 6
+    lux_at_full: 300
+  - id: 5
     name: "Над столом"
-    kind: cct
     pins: { relay: 26, warm: 19, cool: 10 }
     max_power_w: 12
-  - id: 7
-    name: "Рабочая зона"
-    kind: dimmable
-    pins: { pwm: 9 }
-    max_power_w: 5
-  - id: 8
+    lux_at_full: 200
+  - id: 6
     name: "Потолок"
-    kind: cct
     pins: { relay: 6, warm: 23, cool: 24 }
     max_power_w: 15
-  - id: 9
+    lux_at_full: 250
+  - id: 7
     name: "Ночник"
-    kind: dimmable
-    pins: { pwm: 13 }
+    pins: { relay: 7, warm: 13, cool: 9 }
     max_power_w: 3
-  - id: 10
+    lux_at_full: 50
+  - id: 8
     name: "Светильник"
-    kind: onoff
-    pins: { relay: 11 }
+    pins: { relay: 11, warm: 14, cool: 15 }
     max_power_w: 8
+    lux_at_full: 130
 
 # Датчик — TCS34725 на шине I2C-1, адрес 0x29 (фиксированный).
-# Если датчиков больше одного, каждый висит на своём канале мультиплексора
-# TCA9548A (адрес 0x70): тогда укажите mux_channel 1..8, иначе null.
+# Если датчиков больше одного, у КАЖДОГО должен быть свой канал мультиплексора
+# TCA9548A (адрес 0x70), mux_channel 0..7. Датчик без канала при открытом канале
+# другого датчика отвечал бы с ним по одному адресу. Один датчик без мультиплексора — null.
 sensors:
   - id: 1
     name: "Гостиная"
     chip: TCS34725
     bus: "I2C-1"
     address: 0x29
-    mux_channel: null
-    window: 1.0          # доля уличного света, попадающая в комнату (для sim)
+    mux_channel: 0
+    window: 1.0          # доля уличного света, попадающая в комнату (используется только в sim)
   - id: 2
     name: "Кухня"
     chip: TCS34725

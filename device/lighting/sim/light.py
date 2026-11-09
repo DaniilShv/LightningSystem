@@ -11,8 +11,9 @@ def _clamp01(value: float) -> float:
 class VirtualLight(LightDriver):
     """Виртуальная лампа: хранит каналы, из которых считаются свет и мощность."""
 
-    def __init__(self, max_power_w: float) -> None:
+    def __init__(self, max_power_w: float, lux_at_full: float = 300.0) -> None:
         self._max_power_w = max_power_w
+        self._lux_at_full = lux_at_full
         self._relay = False
         self._warm = 0.0
         self._cool = 0.0
@@ -21,6 +22,10 @@ class VirtualLight(LightDriver):
         self._relay = relay
         self._warm = _clamp01(warm)
         self._cool = _clamp01(cool)
+
+    def close(self) -> None:
+        """Ножек у виртуальной лампы нет, поэтому достаточно её погасить."""
+        self.set_output(relay=False, warm=0.0, cool=0.0)
 
     @property
     def duty(self) -> float:
@@ -37,6 +42,11 @@ class VirtualLight(LightDriver):
             return None
         warm_share = self._warm / total
         return round(MAX_KELVIN - (MAX_KELVIN - MIN_KELVIN) * warm_share)
+
+    @property
+    def lux(self) -> float:
+        """Вклад в показания датчика комнаты: E = lux_at_full × duty (docs/model.md)."""
+        return self._lux_at_full * self.duty
 
     @property
     def power_w(self) -> float:

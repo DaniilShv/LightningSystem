@@ -6,6 +6,11 @@ from lighting.hal import SensorDriver, SensorError, SensorReading
 ADDRESS = 0x29
 MULTIPLEXER_ADDRESS = 0x70
 
+# В каждом обращении к регистру старший бит должен быть 1, иначе чип не считает
+# байт адресом регистра. AUTO_INCREMENT нужен, чтобы читать несколько регистров подряд.
+COMMAND_BIT = 0x80
+AUTO_INCREMENT = 0x20
+
 ENABLE_REGISTER = 0x00
 ATIME_REGISTER = 0x01
 CONTROL_REGISTER = 0x0F
@@ -18,6 +23,7 @@ INTEGRATION_SECONDS = 0.05
 MIN_LUX_FOR_CCT = 1.0
 
 READING_REGISTERS = 8
+MULTIPLEXER_CHANNELS = 8
 
 
 class I2CBus(Protocol):
@@ -47,6 +53,8 @@ class Tcs34725Sensor(SensorDriver):
         address: int = ADDRESS,
         channel: int | None = None,
     ) -> None:
+        if channel is not None and not 0 <= channel < MULTIPLEXER_CHANNELS:
+            raise ValueError(f"Канал мультиплексора должен быть от 0 до {MULTIPLEXER_CHANNELS - 1}")
         if bus is None:
             # smbus2 работает только на Raspberry Pi: без I2C (например, на Windows) он не импортируется.
             from smbus2 import SMBus
@@ -55,15 +63,15 @@ class Tcs34725Sensor(SensorDriver):
         self._bus = bus
         self._address = address
         self._channel = channel
-        self._configure()
+        self._configured = False
 
     def _configure(self) -> None:
-        self._select_channel()
         self._write(ENABLE_REGISTER, ENABLE_POWER_ON)
         self._write(ATIME_REGISTER, ATIME_50MS)
         self._write(CONTROL_REGISTER, GAIN_16X)
         # Датчику нужно время на первую интеграцию, иначе первые показания — нули.
         time.sleep(INTEGRATION_SECONDS * 2)
+        self._configured = True
 
     def _select_channel(self) -> None:
         if self._channel is None:
@@ -71,13 +79,20 @@ class Tcs34725Sensor(SensorDriver):
         self._bus.write_byte(MULTIPLEXER_ADDRESS, 1 << self._channel)
 
     def _write(self, register: int, value: int) -> None:
-        self._bus.write_byte_data(self._address, register, value)
+        self._bus.write_byte_data(self._address, COMMAND_BIT | register, value)
 
     def read(self) -> SensorReading:
-        self._select_channel()
         try:
-            data = self._bus.read_i2c_block_data(self._address, CDATA_REGISTER, READING_REGISTERS)
+            self._select_channel()
+            # Настраиваем при первом чтении и после сбоя: датчик могли переподключить, и он
+            # потерял настройки. Так отсутствие датчика при запуске не мешает устройству стартовать.
+            if not self._configured:
+                self._configure()
+            data = self._bus.read_i2c_block_data(
+                self._address, COMMAND_BIT | AUTO_INCREMENT | CDATA_REGISTER, READING_REGISTERS
+            )
         except OSError as error:
+            self._configured = False
             raise SensorError(f"Датчик {self._address:#04x} не ответил: {error}") from error
 
         clear = _word(data[0], data[1])
