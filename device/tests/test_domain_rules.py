@@ -201,6 +201,7 @@ def test_sensor_loss_switches_to_manual_and_keeps_setpoint() -> None:
 
 
 def test_sensor_goes_offline_only_after_three_failures_in_a_row() -> None:
+    """Инвариант 14: у оффлайн-датчика нет показаний."""
     sensor = online_sensor()
 
     sensor = record_failed_read(sensor)

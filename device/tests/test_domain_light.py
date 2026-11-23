@@ -143,3 +143,28 @@ def test_relay_closes_with_first_fade_step() -> None:
     lamp = fade_lamp(make_lamp(), room, dt=0.03)
 
     assert channels(lamp.brightness, lamp.color_temp_k).relay is True
+
+
+def test_free_lit_lamp_fades_out_smoothly_and_keeps_shade() -> None:
+    """Инвариант 13: отвязанная горящая лампа плавно гаснет, оттенок не меняется."""
+    lamp = make_lamp(brightness=100, color_temp_k=3500)
+
+    halfway = fade_lamp(lamp, None, dt=0.3, fade_ms=600)
+    finished = fade_lamp(halfway, None, dt=0.3, fade_ms=600)
+
+    assert halfway.brightness == pytest.approx(50)
+    assert finished.brightness == 0
+    assert finished.color_temp_k == 3500
+    assert channels(finished.brightness, finished.color_temp_k).relay is False
+
+
+def test_free_dark_lamp_stays_dark() -> None:
+    lamp = make_lamp(brightness=0, color_temp_k=5000)
+
+    assert fade_lamp(lamp, None, dt=0.03) == lamp
+
+
+def test_free_lamp_without_fade_goes_dark_at_once() -> None:
+    lamp = make_lamp(brightness=80, color_temp_k=3000)
+
+    assert fade_lamp(lamp, None, dt=0.03, fade_ms=0).brightness == 0
