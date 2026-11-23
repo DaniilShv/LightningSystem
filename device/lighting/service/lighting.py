@@ -8,12 +8,16 @@ from lighting.domain import (
     Mode,
     Room,
     Sensor,
+    SensorStatus,
     Site,
+    apply_auto_brightness,
     bind_lamp,
     bind_sensor,
     channels,
     fade_lamp,
     on_sensor_lost,
+    record_failed_read,
+    record_reading,
     set_brightness,
     set_color_mode,
     set_color_temp,
@@ -26,6 +30,7 @@ from lighting.domain import (
 from lighting.domain.entities import DEFAULT_TARGET_LUX
 from lighting.domain.light import DEFAULT_FADE_MS
 from lighting.hal import LightDriver, PowerMeter
+from lighting.policy import auto_brightness
 from lighting.service.errors import NotFoundError
 from lighting.storage import Database
 
@@ -224,6 +229,31 @@ class LightingService:
             self._site = site
             return site
 
+    # ---------- Замеры датчиков и авто-режим ----------
+    # Эти два метода вызывает цикл опроса датчиков (telemetry) после каждого чтения.
+
+    def record_sensor_reading(self, sensor_id: int, lux: float, cct: int | None) -> Sensor:
+        """Датчик ответил: обновить показания и, если комната в авто, применить решение регулятора."""
+        with self._lock:
+            sensor = record_reading(self._sensor(sensor_id), lux, cct)
+            self._sensors[sensor.id] = sensor
+            room = self._rooms.get(sensor.room_id) if sensor.room_id is not None else None
+            if room is not None and room.mode is Mode.AUTO and self._lamps_settled(room):
+                new_setpoint = auto_brightness(room.brightness, lux, room.target_lux)
+                if new_setpoint is not None:
+                    self._save_room(apply_auto_brightness(room, new_setpoint))
+            return sensor
+
+    def record_sensor_failure(self, sensor_id: int) -> Sensor:
+        """Датчик не ответил. После 3 ошибок подряд он оффлайн, и комната переходит в manual (инвариант 8)."""
+        with self._lock:
+            sensor = record_failed_read(self._sensor(sensor_id))
+            self._sensors[sensor.id] = sensor
+            room = self._rooms.get(sensor.room_id) if sensor.room_id is not None else None
+            if room is not None and room.mode is Mode.AUTO and sensor.status is SensorStatus.OFFLINE:
+                self._save_room(on_sensor_lost(room))
+            return sensor
+
     # ---------- Цикл вывода ----------
 
     def tick(self, dt: float) -> None:
@@ -269,6 +299,10 @@ class LightingService:
 
     def _sensor_of(self, room_id: int) -> Sensor | None:
         return next((sensor for sensor in self._sensors.values() if sensor.room_id == room_id), None)
+
+    def _lamps_settled(self, room: Room) -> bool:
+        """Лампы дошли до уставки: только тогда замер показывает результат прошлого шага регулятора."""
+        return all(lamp.brightness == room.brightness for lamp in self._lamps_of(room.id))
 
     def _save_room(self, room: Room) -> RoomState:
         self._database.save_room(room)
