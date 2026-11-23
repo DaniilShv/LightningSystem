@@ -6,13 +6,15 @@ from lighting.domain import Lamp, LampPins, Sensor, SensorConnection, Site
 
 FIRST_FREE_PIN = 4
 LAST_FREE_PIN = 27
+MULTIPLEXER_CHANNELS = 8
 
 
 @dataclass(frozen=True)
 class Registry:
     """Что физически подключено: содержимое device/device.toml.
 
-    lux_at_full и window нужны только виртуальному железу (sim), поэтому в сущностях domain их нет.
+    lux_at_full, window и sees_lamps нужны только виртуальному железу (sim), поэтому в сущностях domain их нет.
+    sees_lamps — какие лампы физически светят на датчик: {id датчика: [id ламп]}.
     """
 
     site: Site
@@ -20,6 +22,7 @@ class Registry:
     sensors: list[Sensor]
     lux_at_full: dict[int, float]
     window: dict[int, float]
+    sees_lamps: dict[int, list[int]]
 
 
 def load_registry(path: Path) -> Registry:
@@ -46,14 +49,16 @@ def load_registry(path: Path) -> Registry:
         )
         for item in data.get("sensors", [])
     ]
+    sees_lamps = {item["id"]: list(item.get("sees_lamps", [])) for item in data.get("sensors", [])}
     _check_lamps(lamps)
-    _check_sensors(sensors)
+    _check_sensors(sensors, sees_lamps, {lamp.id for lamp in lamps})
     return Registry(
         site=site,
         lamps=lamps,
         sensors=sensors,
         lux_at_full={item["id"]: item["lux_at_full"] for item in data.get("lamps", [])},
         window={item["id"]: item["window"] for item in data.get("sensors", [])},
+        sees_lamps=sees_lamps,
     )
 
 
@@ -69,8 +74,15 @@ def _check_lamps(lamps: list[Lamp]) -> None:
             used[pin] = lamp.name
 
 
-def _check_sensors(sensors: list[Sensor]) -> None:
+def _check_sensors(sensors: list[Sensor], sees_lamps: dict[int, list[int]], lamp_ids: set[int]) -> None:
     _check_unique_ids("датчиков", [sensor.id for sensor in sensors])
+    for sensor in sensors:
+        channel = sensor.connection.mux_channel
+        if channel is not None and not 0 <= channel < MULTIPLEXER_CHANNELS:
+            raise ValueError(f"Датчик «{sensor.name}»: mux_channel должен быть от 0 до {MULTIPLEXER_CHANNELS - 1}")
+        unknown = set(sees_lamps[sensor.id]) - lamp_ids
+        if unknown:
+            raise ValueError(f"Датчик «{sensor.name}»: в sees_lamps нет таких ламп {sorted(unknown)}")
     if len(sensors) < 2:
         return
     # У TCS34725 адрес фиксированный, поэтому несколько датчиков различаются только каналом мультиплексора.

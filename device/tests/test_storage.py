@@ -37,6 +37,7 @@ def test_project_registry_loads() -> None:
     assert registry.sensors[0].connection.address == 0x29
     assert registry.lux_at_full[1] == 400
     assert registry.window[2] == 0.8
+    assert registry.sees_lamps == {1: [1, 2, 3], 2: [4, 5], 3: [6, 7]}
 
 
 def test_sensor_without_mux_channel_is_direct(tmp_path: Path) -> None:
@@ -70,6 +71,22 @@ def test_duplicate_lamp_id_is_rejected(tmp_path: Path) -> None:
     )
 
     with pytest.raises(ValueError, match="id"):
+        load_registry(path)
+
+
+def test_sees_lamps_must_reference_existing_lamps(tmp_path: Path) -> None:
+    sensor = '[[sensors]]\nid = 1\nname = "Д"\nbus = "I2C-1"\naddress = 0x29\nwindow = 1.0\nsees_lamps = [1, 9]\n'
+    path = write_registry(tmp_path, SITE + LAMP.format(id=1, relay=5, warm=17, cool=27) + sensor)
+
+    with pytest.raises(ValueError, match="sees_lamps"):
+        load_registry(path)
+
+
+def test_mux_channel_outside_range_is_rejected(tmp_path: Path) -> None:
+    sensor = '[[sensors]]\nid = 1\nname = "Д"\nbus = "I2C-1"\naddress = 0x29\nmux_channel = 8\nwindow = 1.0\n'
+    path = write_registry(tmp_path, SITE + sensor)
+
+    with pytest.raises(ValueError, match="mux_channel"):
         load_registry(path)
 
 

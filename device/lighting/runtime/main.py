@@ -9,7 +9,7 @@ from fastapi import FastAPI
 
 from lighting import __version__, api
 from lighting.api.errors import register_error_handlers
-from lighting.hal import Clock, LightDriver, PowerMeter
+from lighting.hal import Clock, LightDriver, PowerMeter, SensorDriver
 from lighting.runtime.config import Settings
 from lighting.service.lighting import LightingService
 from lighting.service.system import SystemService
@@ -20,6 +20,8 @@ log = logging.getLogger(__name__)
 
 OUTPUT_PERIOD_S = 0.03
 DEFAULT_LUX_AT_FULL = 300.0
+DEFAULT_WINDOW = 1.0
+SENSOR_NOISE = 0.02  # шум показаний виртуального датчика ±2 % (docs/model.md)
 
 
 def create_clock(runtime: str) -> Clock:
@@ -50,6 +52,40 @@ def create_lights(runtime: str, database: Database, registry: Registry) -> tuple
         for lamp in lamps
     }
     return dict(virtual), VirtualPowerMeter(virtual)
+
+
+def create_sensors(
+    runtime: str, database: Database, registry: Registry, clock: Clock, lights: dict[int, LightDriver]
+) -> dict[int, SensorDriver]:
+    """Драйверы датчиков из базы. Опрашивает их цикл датчиков (telemetry), здесь они только создаются."""
+    sensors = database.load_sensors()
+    if runtime == "hardware":
+        from lighting.hardware import Tcs34725Sensor
+
+        drivers: dict[int, SensorDriver] = {}
+        for sensor in sensors:
+            try:
+                drivers[sensor.id] = Tcs34725Sensor(
+                    address=sensor.connection.address, channel=sensor.connection.mux_channel
+                )
+            except (ImportError, OSError) as error:
+                # ImportError — не Raspberry Pi (нет smbus2), OSError — шина I2C выключена.
+                # Устройство работает дальше, датчик просто остаётся оффлайн.
+                log.error("Датчик «%s» не подключён: %s", sensor.name, error)
+        return drivers
+
+    from lighting.sim import VirtualSensor
+
+    # Датчик видит лампы, которые физически на него светят (sees_lamps), а не привязанные к комнате в программе.
+    return {
+        sensor.id: VirtualSensor(
+            clock=clock,
+            window=registry.window.get(sensor.id, DEFAULT_WINDOW),
+            lamps=[lights[lamp_id] for lamp_id in registry.sees_lamps.get(sensor.id, []) if lamp_id in lights],
+            noise=SENSOR_NOISE,
+        )
+        for sensor in sensors
+    }
 
 
 async def output_loop(service: LightingService, clock: Clock) -> None:
@@ -85,6 +121,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lights, power_meter = create_lights(settings.runtime, database, registry)
         service = LightingService(database, lights, power_meter, settings.fade_ms)
         app.state.lighting_service = service
+        # Для цикла опроса датчиков и эндпоинтов /sim/* (раздел «Стыки между зонами» в AGENTS.md).
+        app.state.sensor_drivers = create_sensors(settings.runtime, database, registry, clock, lights)
+        app.state.clock = clock
         loop = asyncio.create_task(output_loop(service, clock))
         log.info("Устройство запущено, режим %s", settings.runtime)
         try:
