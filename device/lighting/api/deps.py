@@ -1,8 +1,11 @@
 import secrets
+from typing import Annotated
 
-from fastapi import HTTPException, Request, Security, status
+from fastapi import Depends, HTTPException, Request, Security, status
 from fastapi.security import APIKeyHeader
 
+from lighting.api.dto import ErrorOut
+from lighting.service.lighting import LightingService
 from lighting.service.system import SystemService
 
 # auto_error=False: отсутствие заголовка обрабатываем сами, чтобы вернуть 401, а не 403.
@@ -24,3 +27,14 @@ def require_api_key(request: Request, key: str | None = Security(api_key_header)
 
 def get_system_service(request: Request) -> SystemService:
     return request.app.state.system_service
+
+
+def get_lighting_service(request: Request) -> LightingService:
+    return request.app.state.lighting_service
+
+
+Service = Annotated[LightingService, Depends(get_lighting_service)]
+
+# Описания ошибок для Swagger (docs/api.md, раздел «Ошибки»).
+NOT_FOUND = {404: {"model": ErrorOut, "description": "Нет такой комнаты, лампы или датчика"}}
+CONFLICT = {409: {"model": ErrorOut, "description": "Действие нарушает правило модели"}}
