@@ -2,3 +2,7 @@
 
 Чистый модуль: только возвращает решения, сам ничего не применяет. Зависит только от domain.
 """
+
+from lighting.policy.auto import auto_brightness
+
+__all__ = ["auto_brightness"]

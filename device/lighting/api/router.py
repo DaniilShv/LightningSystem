@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 
-from lighting.api import system
+from lighting.api import registry, rooms, site, system
 from lighting.api.deps import require_api_key
 from lighting.api.dto import ErrorOut
 
@@ -11,6 +11,9 @@ protected = APIRouter(
     responses={401: {"model": ErrorOut, "description": "Нет API-ключа или ключ неверный"}},
 )
 protected.include_router(system.router)
+protected.include_router(site.router)
+protected.include_router(rooms.router)
+protected.include_router(registry.router)
 
 router = APIRouter(prefix="/api/v1")
 router.include_router(system.public_router)

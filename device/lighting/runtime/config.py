@@ -15,3 +15,8 @@ class Settings(BaseSettings):
     # Пустой ключ отключает проверку X-API-Key (только для разработки).
     api_key: str = ""
     device_name: str = "LightningSystem"
+    # Реестр подключённого железа и база с комнатами, уставками и привязками.
+    registry_path: Path = DEVICE_DIR / "device.toml"
+    db_path: Path = DEVICE_DIR / "lighting.db"
+    # За сколько миллисекунд яркость проходит весь диапазон 0 → 100 % (плавный переход).
+    fade_ms: float = 600
