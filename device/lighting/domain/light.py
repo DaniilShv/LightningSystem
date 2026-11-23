@@ -53,20 +53,26 @@ def approach(actual: float, setpoint: float, dt: float, speed: float) -> float:
     return actual + step if setpoint > actual else actual - step
 
 
-def fade_lamp(lamp: Lamp, room: Room, dt: float, fade_ms: float = DEFAULT_FADE_MS) -> Lamp:
+def fade_lamp(lamp: Lamp, room: Room | None, dt: float, fade_ms: float = DEFAULT_FADE_MS) -> Lamp:
     """Один шаг плавного перехода: фактические значения лампы догоняют уставки комнаты.
 
+    room = None — лампа свободна: она плавно гаснет, оттенок не меняется (инвариант 13).
     Весь диапазон яркости и весь диапазон температуры проходятся за fade_ms.
     fade_ms = 0 — без перехода, сразу к уставке.
     """
+    if room is None:
+        target_brightness, target_color_temp_k = 0.0, lamp.color_temp_k
+    else:
+        target_brightness, target_color_temp_k = room.brightness, room.color_temp_k
+
     if fade_ms <= 0:
-        return replace(lamp, brightness=room.brightness, color_temp_k=room.color_temp_k)
+        return replace(lamp, brightness=target_brightness, color_temp_k=target_color_temp_k)
 
     fade_s = fade_ms / 1000
     brightness_speed = (MAX_BRIGHTNESS - MIN_BRIGHTNESS) / fade_s
     color_temp_speed = (MAX_COLOR_TEMP_K - MIN_COLOR_TEMP_K) / fade_s
     return replace(
         lamp,
-        brightness=approach(lamp.brightness, room.brightness, dt, brightness_speed),
-        color_temp_k=approach(lamp.color_temp_k, room.color_temp_k, dt, color_temp_speed),
+        brightness=approach(lamp.brightness, target_brightness, dt, brightness_speed),
+        color_temp_k=approach(lamp.color_temp_k, target_color_temp_k, dt, color_temp_speed),
     )
